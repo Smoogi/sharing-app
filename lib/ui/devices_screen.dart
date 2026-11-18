@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_controller.dart';
 import '../services/pairing_service.dart';
+import '../services/self_update.dart';
 import '../services/update_service.dart';
 import 'scan_screen.dart';
 
@@ -227,7 +228,16 @@ class _DevicesScreenState extends State<DevicesScreen> {
                   onPressed: c.checkingUpdate ? null : _checkUpdates,
                   child: const Text('Check for updates')),
             ),
-            if (c.updateInfo != null)
+            if (c.installProgress != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Downloading update. The app restarts when it is ready.'),
+                  const SizedBox(height: 4),
+                  LinearProgressIndicator(value: c.installProgress),
+                ]),
+              ),
+            if (c.updateInfo != null && c.installProgress == null)
               Align(
                 alignment: Alignment.centerLeft,
                 child: FilledButton.icon(
@@ -289,11 +299,15 @@ class _DevicesScreenState extends State<DevicesScreen> {
               child: const Text('Later')),
           FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Open download page')),
+              child: Text(SelfUpdate.supported
+                  ? 'Download and install'
+                  : 'Open download page')),
         ],
       ),
     );
-    if (open == true) {
+    if (open == true && SelfUpdate.supported) {
+      await c.installUpdate();
+    } else if (open == true) {
       await launchUrl(Uri.parse(u.url), mode: LaunchMode.externalApplication);
     }
   }

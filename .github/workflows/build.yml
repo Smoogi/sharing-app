@@ -42,11 +42,12 @@ jobs:
       - run: flutter pub get
       - run: flutter build macos --release
       - run: ditto -c -k --keepParent build/macos/Build/Products/Release/smoogi_share.app smoogi-share-macos.zip
+      - run: shasum -a 256 smoogi-share-macos.zip | sed 's/ .*//' | awk '{print $1"  smoogi-share-macos.zip"}' > smoogi-share-macos.zip.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: macos
           path: smoogi-share-macos.zip
       - if: startsWith(github.ref, 'refs/tags/')
-        run: gh release upload "${{ github.ref_name }}" smoogi-share-macos.zip --clobber
+        run: gh release upload "${{ github.ref_name }}" smoogi-share-macos.zip smoogi-share-macos.zip.sha256 --clobber
         env:
           GH_TOKEN: ${{ github.token }}

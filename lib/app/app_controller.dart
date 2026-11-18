@@ -12,6 +12,7 @@ import '../core/network_info.dart';
 import '../core/posts.dart';
 import '../core/platform_vault.dart';
 import '../core/settings.dart';
+import '../services/self_update.dart';
 import '../services/update_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../core/protocol.dart';
@@ -50,6 +51,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   bool checkingUpdate = false;
   String? updateError;
   bool updateCheckedOk = false;
+  double? installProgress; // non-null while downloading an update
 
   /// Posts shown in the main list (search applied).
   List<ChatMessage> items = [];
@@ -154,6 +156,31 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
       updateError = 'Could not check for updates: $e';
     } finally {
       checkingUpdate = false;
+      notifyListeners();
+    }
+  }
+
+  /// Downloads the update for this platform, verifies it, installs it and
+  /// quits so the new version can take over. Windows and macOS only.
+  Future<void> installUpdate() async {
+    final info = updateInfo, name = SelfUpdate.assetName;
+    if (info == null || name == null || installProgress != null) return;
+    installProgress = 0;
+    updateError = null;
+    notifyListeners();
+    try {
+      final tmp = await getTemporaryDirectory();
+      final dir = Directory(p.join(tmp.path, 'smoogi_update_${info.version}'));
+      final file = await updates.download(info, name, dir, onProgress: (f) {
+        installProgress = f;
+        notifyListeners();
+      });
+      await SelfUpdate.launch(file);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      exit(0);
+    } catch (e) {
+      updateError = 'Update failed: $e';
+      installProgress = null;
       notifyListeners();
     }
   }
