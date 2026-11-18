@@ -60,7 +60,7 @@ String boardDate(int createdAtMs) {
   final t = DateTime.fromMillisecondsSinceEpoch(createdAtMs, isUtc: true).toLocal();
   String two(int n) => n.toString().padLeft(2, '0');
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  return '${two(t.month)}/${two(t.day)}/${two(t.year % 100)}(${days[t.weekday - 1]})'
+  return '${two(t.day)}/${two(t.month)}/${t.year}(${days[t.weekday - 1]})'
       '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
 }
 

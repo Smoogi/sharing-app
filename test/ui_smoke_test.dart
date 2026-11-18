@@ -9,6 +9,11 @@ import 'package:smoogi_share/ui/post_card.dart';
 import 'package:smoogi_share/ui/thread_screen.dart';
 
 void main() {
+  test('board date is dd/mm/yyyy', () {
+    final ms = DateTime(2026, 11, 18, 1, 25, 32).toUtc().millisecondsSinceEpoch;
+    expect(boardDate(ms), '18/11/2026(Wed)01:25:32');
+  });
+
   testWidgets('imageboard UI: posts, quote links, backlinks, thread, reply',
       (tester) async {
     tester.view.physicalSize = const Size(900, 1800);
