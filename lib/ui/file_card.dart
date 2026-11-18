@@ -49,15 +49,21 @@ class FileBody extends StatelessWidget {
             onPressed: () => c.openFile(message),
             icon: const Icon(Icons.open_in_new, size: 18),
             label: const Text('Open')),
-        if (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
+        if (Platform.isWindows || Platform.isLinux || Platform.isMacOS || Platform.isAndroid)
           OutlinedButton.icon(
               onPressed: () async {
-                final path = await c.saveToDownloads(message);
+                String text;
+                try {
+                  final path = await c.saveToDownloads(message);
+                  text = path == null
+                      ? 'Could not find Downloads folder'
+                      : 'Saved to $path';
+                } catch (e) {
+                  text = 'Could not save: $e';
+                }
                 if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(path == null
-                        ? 'Could not find Downloads folder'
-                        : 'Saved to $path')));
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(SnackBar(content: Text(text)));
               },
               icon: const Icon(Icons.download_done, size: 18),
               label: const Text('Save to Downloads')),

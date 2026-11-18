@@ -46,7 +46,56 @@ class MainActivity : FlutterActivity() {
                     result.error("vault", e.message, null)
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "smoogi/files")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "saveToDownloads" -> {
+                        val path = call.argument<String>("path")!!
+                        val name = call.argument<String>("name")!!
+                        val mime = call.argument<String>("mime") ?: "application/octet-stream"
+                        thread {
+                            try {
+                                val shown = saveToDownloads(path, name, mime)
+                                runOnUiThread { result.success(shown) }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("save", e.message, null) }
+                            }
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         handleIntent(intent)
+    }
+
+    /** Copies a file into the public Downloads folder (MediaStore, no permission needed). */
+    private fun saveToDownloads(path: String, name: String, mime: String): String {
+        if (Build.VERSION.SDK_INT < 29) throw Exception("Needs Android 10 or newer")
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mime)
+            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                android.os.Environment.DIRECTORY_DOWNLOADS)
+            put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = contentResolver.insert(
+            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw Exception("Could not create file in Downloads")
+        try {
+            contentResolver.openOutputStream(uri)!!.use { out ->
+                File(path).inputStream().use { it.copyTo(out) }
+            }
+            values.clear()
+            values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+            contentResolver.update(uri, values, null, null)
+        } catch (e: Exception) {
+            contentResolver.delete(uri, null, null)
+            throw e
+        }
+        var shown = name
+        contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DISPLAY_NAME),
+            null, null, null)?.use { c -> if (c.moveToFirst()) shown = c.getString(0) }
+        return "Downloads/" + shown
     }
 
     // --- Android Keystore vault: the AES-GCM key never leaves the Keystore ----
