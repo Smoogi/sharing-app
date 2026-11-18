@@ -251,6 +251,7 @@ class _FrameIO {
   Future<void> get closed => _closedC.future;
 
   void _onData(Uint8List data) {
+    if (_done) return; // draining after local close
     _acc = _acc.isEmpty
         ? data
         : (Uint8List(_acc.length + data.length)
@@ -308,9 +309,23 @@ class _FrameIO {
 
   Future<void> flush() => socket.flush();
 
+  bool _closing = false;
+
+  /// Graceful close: flush, send FIN, keep draining incoming bytes briefly.
+  /// Destroying immediately can make the OS send RST when unread data is
+  /// pending, which on Linux discards our last message (e.g. `bye`) at the
+  /// peer. Local state flips to closed right away.
   Future<void> close() async {
     _finish();
-    socket.destroy();
+    if (_closing) return;
+    _closing = true;
+    Timer(const Duration(seconds: 2), socket.destroy);
+    try {
+      await socket.flush();
+      await socket.close();
+    } catch (_) {
+      socket.destroy();
+    }
   }
 }
 

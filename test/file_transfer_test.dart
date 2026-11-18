@@ -108,15 +108,23 @@ void main() {
     final dl = b.transfers.download(m);
     await eventually(
         () async => (b.transfers.states[m.id]?.received ?? 0) > 50000);
-    await b.manager.channelOf(a.identity.deviceId)!.close();
+    final old = b.manager.channelOf(a.identity.deviceId)!;
+    await old.close();
     await dl;
     expect(b.transfers.states[m.id]!.status, TransferStatus.interrupted);
     expect(await b.store.get(m.id), isNull);
 
-    await eventually(() async => b.manager.isOnline(a.identity.deviceId));
+    await eventually(() async {
+      final c = b.manager.channelOf(a.identity.deviceId);
+      return c != null && c != old && !c.isClosed;
+    });
     await b.transfers.download(m);
     final att = await b.store.get(m.id);
-    expect(await File(att!.path).readAsBytes(), await src.readAsBytes());
+    if (att == null) {
+      final st = b.transfers.states[m.id];
+      fail('no file: ${st?.status} ${st?.message} recv=${st?.received}');
+    }
+    expect(await File(att.path).readAsBytes(), await src.readAsBytes());
   }, timeout: const Timeout(Duration(seconds: 60)));
 
   test('relay: a device that already has the file can serve it', () async {

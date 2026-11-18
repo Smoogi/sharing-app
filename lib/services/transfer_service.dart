@@ -30,6 +30,10 @@ class _Download {
   int received = 0;
   Completer<_Outcome>? result;
   Timer? watchdog;
+
+  /// Serialises file writes: RandomAccessFile.close() throws while an
+  /// async write is pending.
+  Future<void> writeChain = Future.value();
 }
 
 /// File transfer on top of the sync channel. Metadata syncs automatically as
@@ -109,41 +113,54 @@ class TransferService {
       var anyInterrupted = false;
       var anyBad = false;
       for (final id in candidates) {
-        final ch = manager.channelOf(id);
-        if (ch == null) continue;
-        var existing = await part.exists() ? await part.length() : 0;
-        if (existing > meta.size) {
-          await part.delete();
-          existing = 0;
-        }
-        d.received = existing;
-        d.channel = ch;
-        d.raf = await part.open(mode: FileMode.append);
-        d.result = Completer<_Outcome>();
-        _set(m.id, TransferState(TransferStatus.downloading, meta.size,
-            received: existing));
-        _armWatchdog(d);
-        unawaited(ch.closed.then((_) {
-          if (d.result != null && !d.result!.isCompleted) {
-            d.result!.complete(_Outcome.interrupted);
+        // A dropped connection may simply have been replaced by a newer one to
+        // the same device (simultaneous dials): resume on it right away.
+        for (var attempt = 0; attempt < 4; attempt++) {
+          final ch = manager.channelOf(id);
+          if (ch == null || ch.isClosed) break;
+          var existing = await part.exists() ? await part.length() : 0;
+          if (existing > meta.size) {
+            await part.delete();
+            existing = 0;
           }
-        }));
-        try {
-          await ch.send({'t': 'file_get', 'mid': m.id, 'offset': existing});
-        } catch (_) {
-          if (!d.result!.isCompleted) d.result!.complete(_Outcome.interrupted);
+          d.received = existing;
+          d.channel = ch;
+          d.raf = await part.open(mode: FileMode.append);
+          d.result = Completer<_Outcome>();
+          _set(m.id, TransferState(TransferStatus.downloading, meta.size,
+              received: existing));
+          _armWatchdog(d);
+          unawaited(ch.closed.then((_) {
+            if (d.result != null && !d.result!.isCompleted) {
+              d.result!.complete(_Outcome.interrupted);
+            }
+          }));
+          try {
+            await ch.send({'t': 'file_get', 'mid': m.id, 'offset': existing});
+          } catch (_) {
+            if (!d.result!.isCompleted) d.result!.complete(_Outcome.interrupted);
+          }
+          final outcome = await d.result!.future;
+          d.watchdog?.cancel();
+          await d.writeChain.catchError((_) {});
+          await d.raf?.close();
+          d.raf = null;
+          if (outcome == _Outcome.ok) {
+            states.remove(m.id);
+            _changes.add(null);
+            return;
+          }
+          if (outcome == _Outcome.interrupted) {
+            final next = manager.channelOf(id);
+            if (next != null && next != ch && !next.isClosed) {
+              await Future<void>.delayed(const Duration(milliseconds: 100));
+              continue; // resume on the replacement connection
+            }
+            anyInterrupted = true;
+          }
+          if (outcome == _Outcome.badHash) anyBad = true;
+          break;
         }
-        final outcome = await d.result!.future;
-        d.watchdog?.cancel();
-        await d.raf?.close();
-        d.raf = null;
-        if (outcome == _Outcome.ok) {
-          states.remove(m.id);
-          _changes.add(null);
-          return;
-        }
-        if (outcome == _Outcome.interrupted) anyInterrupted = true;
-        if (outcome == _Outcome.badHash) anyBad = true;
       }
       _set(
           m.id,
@@ -162,6 +179,7 @@ class TransferService {
           TransferState(TransferStatus.failed, meta.size, message: '$e'));
     } finally {
       d.watchdog?.cancel();
+      await d.writeChain.catchError((_) {});
       await d.raf?.close().catchError((_) {});
       _downloads.remove(m.id);
       _changes.add(null);
@@ -203,7 +221,9 @@ class TransferService {
           _fail(d, _Outcome.badHash);
           return;
         }
-        await d.raf!.writeFrom(bytes);
+        final raf = d.raf!;
+        d.writeChain = d.writeChain.then((_) => raf.writeFrom(bytes));
+        await d.writeChain;
         d.received += bytes.length;
         final st = states[mid];
         if (st != null) st.received = d.received;
@@ -212,6 +232,7 @@ class TransferService {
       case 'file_end':
         final d = _downloads[mid];
         if (d == null || d.channel != ch) return;
+        await d.writeChain.catchError((_) {});
         await d.raf?.close();
         d.raf = null;
         final ok = await store.finalizeDownload(mid, d.meta);
