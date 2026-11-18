@@ -232,6 +232,9 @@ class TransferService {
       case 'file_end':
         final d = _downloads[mid];
         if (d == null || d.channel != ch) return;
+        // Hashing a big file takes longer than the stall timeout; the data
+        // has all arrived, so the watchdog must not fire from here on.
+        d.watchdog?.cancel();
         await d.writeChain.catchError((_) {});
         await d.raf?.close();
         d.raf = null;

@@ -118,7 +118,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
         _autoTried.clear(); // a (re)connection is a fresh chance to download
         refresh();
       }))
-      ..add(transfers.changes.listen((_) => refresh()));
+      ..add(transfers.changes.listen((_) => _scheduleRefresh()));
     WidgetsBinding.instance.addObserver(this);
     ready = true;
     await refresh();
@@ -190,6 +190,15 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     await settings.save();
     notifyListeners();
     if (on) unawaited(_startupUpdateCheck());
+  }
+
+  Timer? _refreshTimer;
+
+  /// Transfers report progress for every chunk; reloading the whole list that
+  /// often would swamp the UI, so progress updates are coalesced.
+  void _scheduleRefresh() {
+    if (_refreshTimer?.isActive ?? false) return;
+    _refreshTimer = Timer(const Duration(milliseconds: 400), () => refresh());
   }
 
   Future<void> refresh() async {
@@ -357,6 +366,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     for (final s in _subs) {
       s.cancel();
