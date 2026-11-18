@@ -41,6 +41,9 @@ A shared file is a message of kind `file` whose body is `{name,size,sha256,mime}
 ### Discovery
 UDP broadcast beacons on port 48621 (`{id, port}` every 5 s). A paired device that changed IP is rediscovered and reconnected automatically; beacons are only hints and the TCP connection is still pinned to the paired key. (Used instead of mDNS to avoid extra packages and Android multicast-lock issues. mDNS could be added behind the same `onDiscovered` hook.)
 
+### Imageboard-style posts, replies and threads
+Every message gets a stable 9-digit post number (`No.123456789`, derived from its UUID, so identical on all devices). A reply is just text containing `>>123456789`: it syncs, edits and searches like any text and needs no protocol change (older builds show it as plain text). The UI is styled after Yotsuba (light) / a dark board variant: header bar with name, date and No., tap the No. to reply, `>greentext` lines, red `>>` quote links that jump to the post (marked "(You)" for your own posts), backlink rows under each post, `#` to open the thread (everything connected by quotes), and search by text, device name or post number.
+
 ### Editing messages
 Still append-only: an edit is a new message of kind `edit` (`{t: targetId, b: newText}`) that syncs like any other. Every device shows the newest edit (by time, then device id) with an "edited" label; the original row is never rewritten. Any paired device can edit any text message. Files cannot be edited.
 
@@ -59,7 +62,7 @@ Requirements: Flutter 3.47+, Android SDK, and for Windows/Linux/macOS plugin bui
 
 ```powershell
 flutter pub get
-flutter test                                  # 46 automated tests
+flutter test                                  # 52 automated tests
 flutter run -d <device-id>
 flutter build apk --release --target-platform android-arm64   # arm64 only
 flutter build windows                          # needs Developer Mode

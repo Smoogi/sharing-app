@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/identity.dart';
 import '../core/network_info.dart';
+import '../core/posts.dart';
 import '../core/platform_vault.dart';
 import '../core/settings.dart';
 import '../core/protocol.dart';
@@ -39,7 +40,15 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   DiscoveryService? _discovery;
   Map<String, LocalAttachment> attachments = {};
 
+  /// Posts shown in the main list (search applied).
   List<ChatMessage> items = [];
+
+  /// Every post, unfiltered, plus quote/backlink lookups.
+  List<ChatMessage> allPosts = [];
+  PostIndex index = PostIndex(const []);
+
+  final composer = TextEditingController();
+  final composerFocus = FocusNode();
   List<Peer> pairedPeers = [];
   Map<String, Map<String, int>> peerVectors = {};
   List<String> addresses = [];
@@ -50,8 +59,9 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   int get port => _transport.port;
   Set<String> get onlineIds => manager.onlinePeerIds;
 
-  Future<void> init() async {
-    final dir = await getApplicationSupportDirectory();
+  /// [dataDir], [port], [network] exist so tests can run without plugins/ports.
+  Future<void> init({Directory? dataDir, int port = 48620, bool network = true}) async {
+    final dir = dataDir ?? await getApplicationSupportDirectory();
     _identityStore = FileIdentityStore(File(p.join(dir.path, 'identity.json')),
         vault: PlatformVault.create(dir));
     final os = Platform.isAndroid ? 'Android' : Platform.operatingSystem;
@@ -66,7 +76,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     messages = MessageRepository(db, localDeviceId: identity.deviceId);
     peers = PeerRepository(db);
     pairing = PairingService();
-    _transport = SecureTcpTransport(identity: identity, platform: os);
+    _transport = SecureTcpTransport(identity: identity, platform: os, preferredPort: port);
     manager = ConnectionManager(
       identity: identity,
       transport: _transport,
@@ -82,7 +92,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
       portProvider: () => _transport.port,
       onSeen: manager.onDiscovered,
     );
-    unawaited(_discovery!.start());
+    if (network) unawaited(_discovery!.start());
     addresses = await localAddresses();
 
     _subs
@@ -96,11 +106,15 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     ready = true;
     await refresh();
-    unawaited(ShareReceiver.start(_onShare));
+    if (network) unawaited(ShareReceiver.start(_onShare));
   }
 
   Future<void> refresh() async {
-    items = await messages.recent(query: query);
+    allPosts = await messages.recent(limit: 5000);
+    index = PostIndex(allPosts);
+    items = query.trim().isEmpty
+        ? allPosts
+        : [for (final m in allPosts) if (index.matches(m, query)) m];
     pairedPeers = await peers.all();
     peerVectors = await peers.vectors();
     attachments = await store.all();
@@ -116,6 +130,18 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> search(String q) async {
     query = q;
     await refresh();
+  }
+
+  /// Imageboard-style reply: put ">>No." at the start of the draft.
+  void quotePost(int no) {
+    final q = quoteOf(no);
+    final t = composer.text;
+    if (!t.contains(q)) {
+      composer.text = t.isEmpty ? '$q\n' : '$q\n$t';
+    }
+    composer.selection = TextSelection.collapsed(offset: composer.text.length);
+    composerFocus.requestFocus();
+    notifyListeners();
   }
 
   Future<void> sendText(String text) async {

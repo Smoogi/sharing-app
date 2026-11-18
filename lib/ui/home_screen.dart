@@ -1,20 +1,18 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../app/app_controller.dart';
-import '../core/protocol.dart';
-import '../data/attachment_store.dart';
+import '../core/posts.dart';
 import '../services/connection_manager.dart';
 import 'devices_screen.dart';
-import 'file_card.dart';
-
-final _urlRe = RegExp(r'https?://[^\s<>"]+');
+import 'post_card.dart';
+import 'thread_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.controller});
@@ -25,10 +23,13 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _input = TextEditingController();
-  final _scroll = ScrollController();
+  final _scroll = ItemScrollController();
+  final _positions = ItemPositionsListener.create();
   final _searchCtl = TextEditingController();
   bool _searching = false;
+  bool _dragging = false;
+  int? _highlight;
+  Timer? _highlightTimer;
   final _subs = <StreamSubscription<dynamic>>[];
   int _lastCount = 0;
 
@@ -37,48 +38,51 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _lastCount = c.items.length;
     _subs.add(c.manager.pairingRequests.listen(_showPairing));
     _subs.add(c.manager.notices.listen((n) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(n)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(n)));
     }));
     c.addListener(_onChange);
   }
 
+  bool get _atBottom {
+    final p = _positions.itemPositions.value;
+    if (p.isEmpty || c.items.isEmpty) return true;
+    return p.any((e) => e.index >= c.items.length - 2);
+  }
+
   void _onChange() {
-    if (c.items.length != _lastCount) {
-      _lastCount = c.items.length;
+    if (c.items.length > _lastCount && _atBottom) {
+      final last = c.items.length - 1;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scroll.hasClients) {
-          _scroll.jumpTo(_scroll.position.maxScrollExtent);
-        }
+        if (_scroll.isAttached) _scroll.jumpTo(index: last);
       });
     }
+    _lastCount = c.items.length;
   }
 
   @override
   void dispose() {
     c.removeListener(_onChange);
+    _highlightTimer?.cancel();
     for (final s in _subs) {
       s.cancel();
     }
-    _input.dispose();
-    _scroll.dispose();
     _searchCtl.dispose();
     super.dispose();
   }
 
   Future<void> _send() async {
-    final text = _input.text;
+    final text = c.composer.text;
     if (text.trim().isEmpty) return;
     try {
       await c.sendText(text);
-      _input.clear();
+      c.composer.clear();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -98,8 +102,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  bool _dragging = false;
-
   void _showPairing(PairingRequest req) {
     if (!mounted) return;
     showDialog<void>(
@@ -109,20 +111,51 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _jump(int no) {
+    final i = c.items.indexWhere((m) => postNo(m.id) == no);
+    if (i < 0) {
+      // Hidden by the current search: show everything first.
+      if (c.query.isNotEmpty) {
+        _searchCtl.clear();
+        c.search('');
+        setState(() => _searching = false);
+        WidgetsBinding.instance.addPostFrameCallback((_) => _jump(no));
+      }
+      return;
+    }
+    _scroll.scrollTo(
+        index: i,
+        duration: const Duration(milliseconds: 250),
+        alignment: 0.1);
+    setState(() => _highlight = no);
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _highlight = null);
+    });
+  }
+
+  void _thread(int no) {
+    Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ThreadScreen(controller: c, rootNo: no)));
+  }
+
   @override
   Widget build(BuildContext context) {
+    final col = BoardColors.of(context);
     return ListenableBuilder(
       listenable: c,
       builder: (context, _) {
         final online = c.onlineIds.length;
         return Scaffold(
+          backgroundColor: col.page,
           appBar: AppBar(
             title: _searching
                 ? TextField(
                     controller: _searchCtl,
                     autofocus: true,
                     decoration: const InputDecoration(
-                        hintText: 'Search history', border: InputBorder.none),
+                        hintText: 'Search text, name or No.123456789',
+                        border: InputBorder.none),
                     onChanged: c.search,
                   )
                 : const Text('Smoogi Share'),
@@ -156,19 +189,31 @@ class _HomeScreenState extends State<HomeScreen> {
                   ? Center(
                       child: Text(
                           c.query.isEmpty
-                              ? 'Nothing here yet.\nType below, or pair a device from the Devices screen.'
+                              ? 'No posts yet.\nWrite one below, or pair a device from the Devices screen.'
                               : 'No matches.',
-                          textAlign: TextAlign.center),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: col.muted)),
                     )
-                  : ListView.builder(
-                      controller: _scroll,
-                      padding: const EdgeInsets.all(12),
+                  : ScrollablePositionedList.builder(
+                      itemScrollController: _scroll,
+                      itemPositionsListener: _positions,
+                      initialScrollIndex: c.items.length - 1,
+                      padding: const EdgeInsets.fromLTRB(6, 6, 6, 0),
                       itemCount: c.items.length,
-                      itemBuilder: (_, i) =>
-                          MessageCard(message: c.items[i], controller: c),
+                      itemBuilder: (_, i) {
+                        final m = c.items[i];
+                        return PostCard(
+                          key: ValueKey(m.id),
+                          message: m,
+                          controller: c,
+                          highlight: postNo(m.id) == _highlight,
+                          onJump: _jump,
+                          onThread: _thread,
+                        );
+                      },
                     ),
             ),
-            _composer(),
+            _composer(col),
           ])),
         );
       },
@@ -192,12 +237,9 @@ class _HomeScreenState extends State<HomeScreen> {
           Positioned.fill(
             child: IgnorePointer(
               child: Container(
-                color: Theme.of(context)
-                    .colorScheme
-                    .primary
-                    .withValues(alpha: 0.15),
+                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.15),
                 alignment: Alignment.center,
-                child: const Text('Drop files to share',
+                child: const Text('Drop files to post',
                     style: TextStyle(fontSize: 24)),
               ),
             ),
@@ -206,188 +248,51 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _composer() {
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          IconButton(
-              tooltip: 'Attach files',
-              onPressed: _attach,
-              icon: const Icon(Icons.attach_file)),
-          Expanded(
-            child: CallbackShortcuts(
-              bindings: {
-                const SingleActivator(LogicalKeyboardKey.enter, control: true):
-                    _send,
-              },
-              child: TextField(
-                controller: _input,
-                minLines: 1,
-                maxLines: 8,
-                keyboardType: TextInputType.multiline,
-                decoration: InputDecoration(
-                  hintText: 'Message, note, link or log (Ctrl+Enter sends)',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24)),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+  Widget _composer(BoardColors col) {
+    return Material(
+      color: col.header,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(6, 4, 6, 6),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            IconButton(
+                tooltip: 'Attach files',
+                onPressed: _attach,
+                color: col.text,
+                icon: const Icon(Icons.attach_file)),
+            Expanded(
+              child: CallbackShortcuts(
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.enter, control: true):
+                      _send,
+                },
+                child: TextField(
+                  controller: c.composer,
+                  focusNode: c.composerFocus,
+                  minLines: 1,
+                  maxLines: 8,
+                  keyboardType: TextInputType.multiline,
+                  style: TextStyle(color: col.text),
+                  decoration: InputDecoration(
+                    hintText: 'Post (Ctrl+Enter sends). Tap a No. to reply.',
+                    filled: true,
+                    fillColor: col.page,
+                    border: const OutlineInputBorder(borderRadius: BorderRadius.zero),
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          IconButton.filled(
-              tooltip: 'Send', onPressed: _send, icon: const Icon(Icons.send)),
-        ]),
-      ),
-    );
-  }
-}
-
-class MessageCard extends StatefulWidget {
-  const MessageCard({super.key, required this.message, required this.controller});
-  final ChatMessage message;
-  final AppController controller;
-
-  @override
-  State<MessageCard> createState() => _MessageCardState();
-}
-
-class _MessageCardState extends State<MessageCard> {
-  bool _expanded = false;
-  static const _collapsedLines = 14;
-
-  @override
-  Widget build(BuildContext context) {
-    final m = widget.message;
-    final c = widget.controller;
-    final cs = Theme.of(context).colorScheme;
-    final mine = m.originDeviceId == c.identity.deviceId;
-    final lines = '\n'.allMatches(m.body).length + 1;
-    final long = lines > _collapsedLines;
-    final urls = m.kind != 'text' ? <String>{} : _urlRe.allMatches(m.body).map((e) => e.group(0)!).toSet();
-    final t = DateTime.fromMillisecondsSinceEpoch(m.createdAt, isUtc: true)
-        .toLocal();
-    final time =
-        '${t.year}-${_2(t.month)}-${_2(t.day)} ${_2(t.hour)}:${_2(t.minute)}';
-    final status = mine ? c.syncStatus(m) : null;
-
-    return Card(
-      color: mine ? cs.primaryContainer : cs.surfaceContainerHighest,
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Expanded(
-              child: Text(
-                '${mine ? 'This device' : m.originName} · $time'
-                '${m.editedAt != null ? ' · edited' : ''}'
-                '${status != null ? ' · $status' : ''}',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-            ),
-            if (m.kind == 'text')
-              IconButton(
-                tooltip: 'Edit',
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.edit, size: 18),
-                onPressed: () => _edit(context),
-              ),
-            IconButton(
-              tooltip: 'Copy',
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.copy, size: 18),
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(
-                    text: m.kind == 'file'
-                        ? (FileMeta.tryParse(m.body)?.name ?? m.body)
-                        : m.body));
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Copied'),
-                    duration: Duration(milliseconds: 900)));
-              },
-            ),
+            const SizedBox(width: 6),
+            FilledButton(onPressed: _send, child: const Text('Post')),
           ]),
-          if (m.kind == 'file')
-            Padding(
-              padding: const EdgeInsets.only(right: 8, bottom: 4),
-              child: FileBody(message: m, controller: c),
-            )
-          else if (m.kind != 'text')
-            Text('Unsupported item type "${m.kind}" (update the app)',
-                style: const TextStyle(fontStyle: FontStyle.italic))
-          else
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: SelectableText(
-                long && !_expanded
-                    ? '${m.body.split('\n').take(_collapsedLines).join('\n')}\n…'
-                    : m.body,
-                style: lines > 3
-                    ? const TextStyle(fontFamily: 'monospace', fontSize: 13)
-                    : null,
-              ),
-            ),
-          if (long)
-            TextButton(
-              onPressed: () => setState(() => _expanded = !_expanded),
-              child: Text(_expanded ? 'Show less' : 'Show all $lines lines'),
-            ),
-          for (final u in urls)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                icon: const Icon(Icons.open_in_new, size: 16),
-                label: Text(u, overflow: TextOverflow.ellipsis),
-                onPressed: () =>
-                    launchUrl(Uri.parse(u), mode: LaunchMode.externalApplication),
-              ),
-            ),
-        ]),
-      ),
-    );
-  }
-
-  Future<void> _edit(BuildContext context) async {
-    final ctl = TextEditingController(text: widget.message.body);
-    final text = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit message'),
-        content: SizedBox(
-          width: 500,
-          child: TextField(
-            controller: ctl,
-            autofocus: true,
-            minLines: 3,
-            maxLines: 14,
-            style: const TextStyle(fontFamily: 'monospace'),
-          ),
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, ctl.text),
-              child: const Text('Save')),
-        ],
       ),
     );
-    if (text == null || text == widget.message.body) return;
-    try {
-      await widget.controller.editMessage(widget.message, text);
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$e')));
-    }
   }
-
-  String _2(int n) => n.toString().padLeft(2, '0');
 }
 
 class PairingDialog extends StatefulWidget {
