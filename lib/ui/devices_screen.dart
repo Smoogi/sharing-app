@@ -3,9 +3,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_controller.dart';
 import '../services/pairing_service.dart';
+import '../services/update_service.dart';
 import 'scan_screen.dart';
 
 class DevicesScreen extends StatefulWidget {
@@ -209,6 +211,39 @@ class _DevicesScreenState extends State<DevicesScreen> {
               ),
             ),
             const Divider(height: 32),
+            Text('Updates', style: Theme.of(context).textTheme.titleMedium),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('Version ${c.currentVersion ?? '-'}'),
+              subtitle: Text(c.checkingUpdate
+                  ? 'Checking...'
+                  : c.updateInfo != null
+                      ? 'Version ${c.updateInfo!.version} is available'
+                      : c.updateError ??
+                          (c.updateCheckedOk
+                              ? 'You are up to date'
+                              : 'Checks GitHub only when you ask')),
+              trailing: OutlinedButton(
+                  onPressed: c.checkingUpdate ? null : _checkUpdates,
+                  child: const Text('Check for updates')),
+            ),
+            if (c.updateInfo != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                    onPressed: () => _showUpdate(c.updateInfo!),
+                    icon: const Icon(Icons.system_update),
+                    label: Text('See version ${c.updateInfo!.version}')),
+              ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Check once a day automatically'),
+              subtitle: const Text(
+                  'Off by default. Only asks GitHub for the newest version; nothing is installed for you.'),
+              value: c.settings.autoUpdateCheck,
+              onChanged: c.setAutoUpdateCheck,
+            ),
+            const Divider(height: 32),
             Text('Paired devices',
                 style: Theme.of(context).textTheme.titleMedium),
             if (c.pairedPeers.isEmpty) const Text('None yet.'),
@@ -234,6 +269,33 @@ class _DevicesScreenState extends State<DevicesScreen> {
         );
       },
     );
+  }
+
+  Future<void> _checkUpdates() async {
+    await c.checkForUpdates();
+    if (mounted && c.updateInfo != null) await _showUpdate(c.updateInfo!);
+  }
+
+  Future<void> _showUpdate(UpdateInfo u) async {
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Version ${u.version} is available'),
+        content: SingleChildScrollView(
+            child: SelectableText(u.notes.isEmpty ? 'No release notes.' : u.notes)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Later')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Open download page')),
+        ],
+      ),
+    );
+    if (open == true) {
+      await launchUrl(Uri.parse(u.url), mode: LaunchMode.externalApplication);
+    }
   }
 
   Future<void> _rename() async {

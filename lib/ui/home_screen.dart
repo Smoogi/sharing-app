@@ -174,8 +174,8 @@ class _HomeScreenState extends State<HomeScreen> {
               IconButton(
                 tooltip: 'Devices',
                 icon: Badge(
-                  isLabelVisible: online > 0,
-                  label: Text('$online'),
+                  isLabelVisible: online > 0 || c.updateInfo != null,
+                  label: Text(c.updateInfo != null ? '!' : '$online'),
                   child: const Icon(Icons.devices),
                 ),
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute(

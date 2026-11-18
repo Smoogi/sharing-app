@@ -11,6 +11,8 @@ import '../core/network_info.dart';
 import '../core/posts.dart';
 import '../core/platform_vault.dart';
 import '../core/settings.dart';
+import '../services/update_service.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../core/protocol.dart';
 import '../data/app_database.dart';
 import '../data/attachment_store.dart';
@@ -39,6 +41,14 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   bool _autoRunning = false;
   DiscoveryService? _discovery;
   Map<String, LocalAttachment> attachments = {};
+
+  /// Update check state. [updateInfo] is non-null while a newer release exists.
+  UpdateService updates = UpdateService();
+  String? currentVersion;
+  UpdateInfo? updateInfo;
+  bool checkingUpdate = false;
+  String? updateError;
+  bool updateCheckedOk = false;
 
   /// Posts shown in the main list (search applied).
   List<ChatMessage> items = [];
@@ -110,6 +120,48 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     ready = true;
     await refresh();
     if (network) unawaited(ShareReceiver.start(_onShare));
+    if (network) {
+      unawaited(_version().then((_) => notifyListeners(), onError: (_) {}));
+      unawaited(_startupUpdateCheck());
+    }
+  }
+
+  Future<String> _version() async =>
+      currentVersion ??= (await PackageInfo.fromPlatform()).version;
+
+  /// Daily check, only when the user switched it on.
+  Future<void> _startupUpdateCheck() async {
+    if (!settings.autoUpdateCheck) return;
+    final day = const Duration(hours: 24).inMilliseconds;
+    if (DateTime.now().millisecondsSinceEpoch - settings.lastUpdateCheck < day) return;
+    await checkForUpdates();
+  }
+
+  /// Asks GitHub for the latest release. Never downloads or installs anything.
+  Future<void> checkForUpdates() async {
+    if (checkingUpdate) return;
+    checkingUpdate = true;
+    updateError = null;
+    updateCheckedOk = false;
+    notifyListeners();
+    try {
+      updateInfo = await updates.check(await _version());
+      updateCheckedOk = true;
+      settings.lastUpdateCheck = DateTime.now().millisecondsSinceEpoch;
+      await settings.save();
+    } catch (e) {
+      updateError = 'Could not check for updates: $e';
+    } finally {
+      checkingUpdate = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> setAutoUpdateCheck(bool on) async {
+    settings.autoUpdateCheck = on;
+    await settings.save();
+    notifyListeners();
+    if (on) unawaited(_startupUpdateCheck());
   }
 
   Future<void> refresh() async {
