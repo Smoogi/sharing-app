@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/identity.dart';
 import '../core/network_info.dart';
+import '../core/platform_vault.dart';
 import '../core/settings.dart';
 import '../core/protocol.dart';
 import '../data/app_database.dart';
@@ -52,7 +53,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> init() async {
     final dir = await getApplicationSupportDirectory();
     _identityStore = FileIdentityStore(File(p.join(dir.path, 'identity.json')),
-        vault: SecureStorageVault());
+        vault: PlatformVault.create(dir));
     final os = Platform.isAndroid ? 'Android' : Platform.operatingSystem;
     identity = await _identityStore.loadOrCreate(defaultName: os);
     // First run: make the default name recognisable.

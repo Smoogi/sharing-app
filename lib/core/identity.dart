@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'bytes.dart';
 
@@ -62,23 +61,10 @@ class DeviceIdentity {
 }
 
 /// Where the private seed can live outside the app's plain files
-/// (Android Keystore-backed, Windows Credential Manager, macOS Keychain, ...).
+/// (Android Keystore, Windows DPAPI; see platform_vault.dart).
 abstract class SeedVault {
   Future<String?> read();
   Future<void> write(String value);
-}
-
-class SecureStorageVault implements SeedVault {
-  SecureStorageVault([FlutterSecureStorage? s])
-      : _s = s ?? const FlutterSecureStorage();
-  final FlutterSecureStorage _s;
-  static const _key = 'smoogi_identity_seed_v1';
-
-  @override
-  Future<String?> read() => _s.read(key: _key);
-
-  @override
-  Future<void> write(String value) => _s.write(key: _key, value: value);
 }
 
 /// Identity persistence. The Ed25519 seed is kept in the OS secure store when

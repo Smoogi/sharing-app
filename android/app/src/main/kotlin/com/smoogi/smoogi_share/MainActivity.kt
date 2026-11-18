@@ -34,7 +34,53 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "smoogi/vault")
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "read" -> result.success(vaultRead())
+                        "write" -> { vaultWrite(call.arguments as String); result.success(null) }
+                        else -> result.notImplemented()
+                    }
+                } catch (e: Exception) {
+                    result.error("vault", e.message, null)
+                }
+            }
         handleIntent(intent)
+    }
+
+    // --- Android Keystore vault: the AES-GCM key never leaves the Keystore ----
+    private fun vaultKey(): javax.crypto.SecretKey {
+        val ks = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (ks.getKey("smoogi_seed_key", null) as? javax.crypto.SecretKey)?.let { return it }
+        val gen = javax.crypto.KeyGenerator.getInstance(
+            android.security.keystore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        gen.init(android.security.keystore.KeyGenParameterSpec.Builder(
+            "smoogi_seed_key",
+            android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or
+                android.security.keystore.KeyProperties.PURPOSE_DECRYPT)
+            .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setKeySize(256).build())
+        return gen.generateKey()
+    }
+
+    private fun vaultWrite(value: String) {
+        val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(javax.crypto.Cipher.ENCRYPT_MODE, vaultKey())
+        val blob = c.iv + c.doFinal(value.toByteArray(Charsets.UTF_8))
+        getSharedPreferences("smoogi_vault", MODE_PRIVATE).edit()
+            .putString("seed", android.util.Base64.encodeToString(blob, android.util.Base64.NO_WRAP))
+            .apply()
+    }
+
+    private fun vaultRead(): String? {
+        val s = getSharedPreferences("smoogi_vault", MODE_PRIVATE).getString("seed", null) ?: return null
+        val blob = android.util.Base64.decode(s, android.util.Base64.NO_WRAP)
+        val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(javax.crypto.Cipher.DECRYPT_MODE, vaultKey(),
+            javax.crypto.spec.GCMParameterSpec(128, blob.copyOfRange(0, 12)))
+        return String(c.doFinal(blob.copyOfRange(12, blob.size)), Charsets.UTF_8)
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -41,16 +41,29 @@ A shared file is a message of kind `file` whose body is `{name,size,sha256,mime}
 ### Discovery
 UDP broadcast beacons on port 48621 (`{id, port}` every 5 s). A paired device that changed IP is rediscovered and reconnected automatically; beacons are only hints and the TCP connection is still pinned to the paired key. (Used instead of mDNS to avoid extra packages and Android multicast-lock issues. mDNS could be added behind the same `onDiscovered` hook.)
 
+### Editing messages
+Still append-only: an edit is a new message of kind `edit` (`{t: targetId, b: newText}`) that syncs like any other. Every device shows the newest edit (by time, then device id) with an "edited" label; the original row is never rewritten. Any paired device can edit any text message. Files cannot be edited.
+
+### Auto-download
+Devices screen -> "Auto-download files up to" (Off / 5 / 10 / 25 / 100 MB, default 10). Larger files stay "not downloaded" until you tap Download.
+
+### Identity key storage
+Android: AES-GCM key in the Android Keystore wraps the seed. Windows: DPAPI (bound to your Windows account). Linux/macOS: still an app-private file (TODO libsecret/Keychain). An old file-based seed is migrated automatically after a verified round trip. If a vaulted key goes missing the app refuses to start rather than silently creating a new identity.
+
+### Protocol version
+Protocol v2 (binary file chunks). v1 builds refuse to sync with v2 and say so; update all devices together.
+
 ## Run
 
 Requirements: Flutter 3.47+, Android SDK, and for Windows/Linux/macOS plugin builds on Windows **Developer Mode ON** (`start ms-settings:developers`, needed for symlinks).
 
 ```powershell
 flutter pub get
-flutter test                                  # 37 automated tests
+flutter test                                  # 46 automated tests
 flutter run -d <device-id>
 flutter build apk --release --target-platform android-arm64   # arm64 only
 flutter build windows                          # needs Developer Mode
+powershell -File installer\build_installer.ps1  # dist\smoogi-share-setup.exe (IExpress, per-user, no admin)
 ```
 
 ## Manual test procedure (Android <-> Android) - NOT yet performed by the author
@@ -70,11 +83,14 @@ Android <-> Windows: run the Windows build, open Devices on Windows, pair the ph
 
 ## Known limitations
 - Handshake is composed from standard primitives but has not been independently audited.
-- Identity seed is stored in an app-private JSON file, not the OS keystore (TODO: flutter_secure_storage).
-- Transfers use pure-Dart ChaCha20-Poly1305 plus base64 in JSON frames: expect a few MB/s, fine for typical files, slow for multi-GB. Binary frames / `cryptography_flutter` are the obvious optimisation.
+- Identity seed is in the OS keystore on Android/Windows only (see above).
+- Transfers use pure-Dart ChaCha20-Poly1305 over binary frames: about 8-10 MB/s measured on loopback in a debug VM (release is faster); fine for typical files, slow for multi-GB.
 - Android may close sockets when backgrounded (no background service in V1); reconnect occurs on resume.
 - Broadcast discovery assumes /24 subnets plus 255.255.255.255; some routers block broadcasts between Wi-Fi and wired segments - use manual address then.
 - Message order uses origin clocks; per-origin order is always exact.
 - Text messages max 1 MiB; use a file for larger content.
 - `desktop_drop` is pinned below 0.9 and `file_selector` is used instead of `file_picker` because of a `cross_file` version conflict.
-- Message editing/deletion, auto-download of small files and background sync are out of scope for V1.
+- Deletion and background sync are out of scope for V1.
+
+## Desktop CI
+`.github/workflows/build.yml` builds and tests Linux and builds macOS (unsigned) on GitHub's runners (manual run, or on `v*` tags where it also attaches the artifacts to the release). macOS builds are unsigned: right-click -> Open the first time.
