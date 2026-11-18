@@ -49,7 +49,7 @@ Requirements: Flutter 3.47+, Android SDK, and for Windows/Linux/macOS plugin bui
 flutter pub get
 flutter test                                  # 37 automated tests
 flutter run -d <device-id>
-flutter build apk --release --split-per-abi   # use app-arm64-v8a-release.apk on Poco / S24 Ultra
+flutter build apk --release --target-platform android-arm64   # arm64 only
 flutter build windows                          # needs Developer Mode
 ```
 
