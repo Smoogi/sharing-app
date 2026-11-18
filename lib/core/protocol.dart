@@ -17,6 +17,11 @@ const maxFrameBytes = 8 * 1024 * 1024;
 /// device id, then seq) wins; the original is never rewritten.
 const editKind = 'edit';
 
+/// Deleting a post appends a tombstone of kind 'delete' ({"t": targetId}).
+/// Every device hides the post and blanks its stored content (the empty row
+/// stays so per-device sequence numbers remain contiguous).
+const deleteKind = 'delete';
+
 /// Max UTF-8 size of one text message body.
 const maxTextBytes = 1024 * 1024;
 

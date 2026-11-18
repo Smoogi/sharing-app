@@ -140,10 +140,58 @@ class MessageRepository {
           gaps++;
         }
       }
+      await _redactDeleted(txn);
     });
     if (inserted.isNotEmpty) _changes.add(null);
     return ApplyResult(
         inserted: inserted, duplicates: dup, gaps: gaps, conflicts: conflicts);
+  }
+
+  /// Ids of posts that have a tombstone.
+  Future<Set<String>> deletedIds() async {
+    final rows = await _db.query('messages',
+        columns: ['body'], where: 'kind=?', whereArgs: [deleteKind]);
+    final out = <String>{};
+    for (final r in rows) {
+      try {
+        final j = jsonDecode(r['body'] as String);
+        if (j is Map && j['t'] is String) out.add(j['t'] as String);
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  /// Blanks the content of every deleted post (and of edits targeting it).
+  /// Idempotent; also covers a tombstone that arrived before its post.
+  Future<void> _redactDeleted(DatabaseExecutor db) async {
+    final rows = await db.query('messages',
+        columns: ['body'], where: 'kind=?', whereArgs: [deleteKind]);
+    for (final r in rows) {
+      try {
+        final j = jsonDecode(r['body'] as String);
+        if (j is! Map || j['t'] is! String) continue;
+        final id = j['t'] as String;
+        await db.rawUpdate(
+            "UPDATE messages SET body='' WHERE id=? AND body<>'' AND kind NOT IN (?,?)",
+            [id, deleteKind, editKind]);
+        await db.rawUpdate("UPDATE messages SET body='{}' WHERE kind=? AND body LIKE ? AND body<>'{}'",
+            [editKind, '%"t":"$id"%']);
+      } catch (_) {}
+    }
+  }
+
+  /// Appends a tombstone for [targetId] and blanks its content locally.
+  Future<ChatMessage> createDelete(String targetId, String originName) async {
+    final rows = await _db.query('messages',
+        columns: ['kind'], where: 'id=?', whereArgs: [targetId]);
+    if (rows.isEmpty || (rows.first['kind'] != 'text' && rows.first['kind'] != 'file')) {
+      throw ArgumentError('Nothing to delete');
+    }
+    final m = await createLocalText(jsonEncode({'t': targetId}), originName,
+        kind: deleteKind);
+    await _redactDeleted(_db);
+    _changes.add(null);
+    return m;
   }
 
   /// Latest edit per target message id: {id: (text, editTime)}.
@@ -168,15 +216,16 @@ class MessageRepository {
   /// [query] filters case-insensitively on the *current* text.
   Future<List<ChatMessage>> recent({String? query, int limit = 500}) async {
     final edits = await _edits();
+    final deleted = await deletedIds();
     final q = query?.trim().toLowerCase() ?? '';
     final rows = await _db.query('messages',
-        where: 'kind<>?',
-        whereArgs: [editKind],
-        orderBy: 'created_at DESC, origin_device DESC, origin_seq DESC',
-        limit: q.isEmpty ? limit : null);
+        where: 'kind NOT IN (?,?)',
+        whereArgs: [editKind, deleteKind],
+        orderBy: 'created_at DESC, origin_device DESC, origin_seq DESC');
     final out = <ChatMessage>[];
     for (final r in rows) {
       var m = _fromRow(r);
+      if (deleted.contains(m.id)) continue;
       final e = m.kind == 'text' ? edits[m.id] : null;
       if (e != null) m = m.withEdit(e.$1, e.$2);
       if (q.isNotEmpty &&
@@ -205,5 +254,5 @@ class MessageRepository {
   }
 
   Future<int> count() async => Sqflite.firstIntValue(await _db
-    .rawQuery('SELECT COUNT(*) FROM messages WHERE kind<>?', [editKind]))!;
+    .rawQuery('SELECT COUNT(*) FROM messages WHERE kind NOT IN (?,?)', [editKind, deleteKind]))!;
 }

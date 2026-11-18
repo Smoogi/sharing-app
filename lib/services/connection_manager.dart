@@ -201,6 +201,12 @@ class ConnectionManager {
     return msg;
   }
 
+  Future<ChatMessage> sendDelete(String targetId) async {
+    final msg = await messages.createDelete(targetId, identity.name);
+    await _broadcast([msg]);
+    return msg;
+  }
+
   Future<ChatMessage> sendEdit(String targetId, String newText) async {
     if (newText.trim().isEmpty) throw ArgumentError('Empty message');
     if (utf8.encode(newText).length > maxTextBytes) {

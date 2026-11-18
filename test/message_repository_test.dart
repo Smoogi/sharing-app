@@ -22,6 +22,7 @@ ChatMessage m(String dev, int seq, {String? id, String body = 'x'}) =>
 
 void main() {
   group("edits", editTests);
+  group("delete", deleteTests);
   late MessageRepository repo;
   setUp(() async {
     repo = MessageRepository(await AppDatabase.open(inMemoryDatabasePath),
@@ -156,5 +157,61 @@ void editTests() {
     final f = await repo.createLocalText('{}', 'A', kind: 'file');
     expect(() => repo.createEdit(f.id, 'x', 'A'), throwsArgumentError);
     expect(() => repo.createEdit('nope', 'x', 'A'), throwsArgumentError);
+  });
+}
+
+void deleteTests() {
+  late MessageRepository repo;
+  setUp(() async {
+    repo = MessageRepository(await AppDatabase.open(inMemoryDatabasePath),
+        localDeviceId: a);
+  });
+
+  test('delete hides the post, blanks stored content and its edits', () async {
+    final m1 = await repo.createLocalText('secret text', 'A');
+    final keep = await repo.createLocalText('keep me', 'A');
+    await repo.createEdit(m1.id, 'secret edited', 'A');
+    await repo.createDelete(m1.id, 'A');
+    final view = await repo.recent();
+    expect(view.map((e) => e.id), [keep.id]);
+    expect(await repo.count(), 2);
+    expect(await repo.deletedIds(), {m1.id});
+    // Nothing of the deleted text remains in the database.
+    final all = await repo.missingFor({});
+    for (final row in all) {
+      expect(row.body, isNot(contains('secret')));
+    }
+    expect((await repo.recent(query: 'secret')).length, 0);
+  });
+
+  test('delete syncs: other device blanks the post, even if tombstone arrives first', () async {
+    final dbB = await AppDatabase.open(inMemoryDatabasePath);
+    final repoB = MessageRepository(dbB, localDeviceId: b);
+    final dbC = await AppDatabase.open(inMemoryDatabasePath);
+    final repoC = MessageRepository(dbC, localDeviceId: 'c' * 32);
+
+    final m1 = await repo.createLocalText('to be deleted', 'A');
+    await repoB.apply(await repo.missingFor(await repoB.vector()));
+    await repoB.createDelete(m1.id, 'B');
+
+    // C hears the tombstone (origin b) before the post (origin a).
+    final fromB = (await repoB.missingFor({})).where((x) => x.originDeviceId == b).toList();
+    await repoC.apply(fromB);
+    await repoC.apply(await repo.missingFor(await repoC.vector())); // original arrives late
+    expect((await repoC.recent()), isEmpty);
+    final raw = await repoC.missingFor({});
+    expect(raw.where((x) => x.id == m1.id).single.body, '');
+
+    // A learns of the deletion from B.
+    await repo.apply(await repoB.missingFor(await repo.vector()));
+    expect(await repo.recent(), isEmpty);
+    expect(await repo.vector(), await repoB.vector());
+  });
+
+  test('cannot delete unknown posts or delete events', () async {
+    expect(() => repo.createDelete('nope', 'A'), throwsArgumentError);
+    final m1 = await repo.createLocalText('x', 'A');
+    final d = await repo.createDelete(m1.id, 'A');
+    expect(() => repo.createDelete(d.id, 'A'), throwsArgumentError);
   });
 }

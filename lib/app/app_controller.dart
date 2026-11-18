@@ -47,6 +47,9 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   List<ChatMessage> allPosts = [];
   PostIndex index = PostIndex(const []);
 
+  /// Post numbers of deleted posts (so quotes can say "(Deleted)").
+  Set<int> deletedNos = {};
+
   final composer = TextEditingController();
   final composerFocus = FocusNode();
   List<Peer> pairedPeers = [];
@@ -118,6 +121,13 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     pairedPeers = await peers.all();
     peerVectors = await peers.vectors();
     attachments = await store.all();
+    final deleted = await messages.deletedIds();
+    deletedNos = {for (final id in deleted) postNo(id)};
+    // Drop files of posts deleted on any device.
+    for (final id in attachments.keys.where(deleted.contains).toList()) {
+      await store.remove(id);
+      attachments.remove(id);
+    }
     notifyListeners();
     unawaited(_autoDownload());
   }
@@ -178,6 +188,11 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     } finally {
       _autoRunning = false;
     }
+  }
+
+  Future<void> deleteMessage(ChatMessage m) async {
+    await manager.sendDelete(m.id);
+    await store.remove(m.id);
   }
 
   Future<void> editMessage(ChatMessage m, String newText) async {

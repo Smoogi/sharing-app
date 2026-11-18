@@ -62,7 +62,7 @@ Requirements: Flutter 3.47+, Android SDK, and for Windows/Linux/macOS plugin bui
 
 ```powershell
 flutter pub get
-flutter test                                  # 52 automated tests
+flutter test                                  # 57 automated tests
 flutter run -d <device-id>
 flutter build apk --release --target-platform android-arm64   # arm64 only
 flutter build windows                          # needs Developer Mode

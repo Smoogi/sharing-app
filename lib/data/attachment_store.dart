@@ -233,6 +233,15 @@ class AttachmentStore {
     return true;
   }
 
+  /// Removes a stored file (or partial download) and its record.
+  Future<void> remove(String messageId) async {
+    await _db.delete('attachments', where: 'message_id=?', whereArgs: [messageId]);
+    final d = dirFor(messageId);
+    try {
+      if (await d.exists()) await d.delete(recursive: true);
+    } catch (_) {}
+  }
+
   /// Copies a stored file to [targetDir] without overwriting anything
   /// ("name (1).ext" if needed). Returns the new path.
   Future<String> saveCopy(LocalAttachment a, Directory targetDir) async {

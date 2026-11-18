@@ -247,8 +247,9 @@ class _PostCardState extends State<PostCard> {
         case SpanKind.ref:
           final no = s.refNo!;
           final you = c.index.byNo[no]?.originDeviceId == c.identity.deviceId;
+          final gone = c.deletedNos.contains(no);
           spans.add(TextSpan(
-              text: s.text + (you ? ' (You)' : ''),
+              text: s.text + (you ? ' (You)' : '') + (gone ? ' (Deleted)' : ''),
               style: TextStyle(
                   color: col.ref, decoration: TextDecoration.underline),
               recognizer: _tap(() => _openRef(no))));
@@ -311,6 +312,8 @@ class _PostCardState extends State<PostCard> {
             if (mounted) _snack('Copied ${quoteOf(no)}');
           case 'thread':
             widget.onThread?.call(no);
+          case 'delete':
+            await _confirmDelete(context);
         }
       },
       itemBuilder: (_) => [
@@ -321,8 +324,35 @@ class _PostCardState extends State<PostCard> {
         const PopupMenuItem(value: 'copyno', child: Text('Copy post link')),
         if (widget.onThread != null)
           const PopupMenuItem(value: 'thread', child: Text('Show thread')),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: 'delete', child: Text('Delete')),
       ],
     );
+  }
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete No.${postNo(widget.message.id)}?'),
+        content: const Text(
+            'The post and its file are removed from all your paired devices. This cannot be undone. Devices that are offline delete it when they next connect.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await widget.controller.deleteMessage(widget.message);
+    } catch (e) {
+      if (mounted) _snack('$e');
+    }
   }
 
   Future<void> _edit(BuildContext context) async {

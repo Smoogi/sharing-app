@@ -71,4 +71,25 @@ void main() {
     expect(find.byType(PostCard), findsNWidgets(2));
     expect(tester.takeException(), isNull);
   });
+
+  test('deleting a file post removes it and its stored file', () async {
+    final dir = await Directory.systemTemp.createTemp('smoogi_del');
+    final c = AppController();
+    await c.init(dataDir: dir, port: 0, network: false);
+    final src = File('${dir.path}/pic.bin')..writeAsBytesSync(List.filled(1000, 7));
+    await c.sendFiles([src.path]);
+    final text = await c.manager.sendText('hello');
+    await c.refresh();
+    expect(c.items.length, 2);
+    final file = c.items.firstWhere((m) => m.kind == 'file');
+    final stored = c.attachments[file.id]!.path;
+    expect(File(stored).existsSync(), isTrue);
+
+    await c.deleteMessage(file);
+    await c.deleteMessage(text);
+    await c.refresh();
+    expect(c.items, isEmpty);
+    expect(File(stored).existsSync(), isFalse);
+    expect(c.deletedNos, containsAll([postNo(file.id), postNo(text.id)]));
+  });
 }
