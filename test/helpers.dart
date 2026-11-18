@@ -50,7 +50,7 @@ Future<TestNode> makeNode(String name,
       manager: mgr,
       store: store,
       messages: msgs,
-      chunkSize: 4096,
+      chunkSize: 16 * 1024,
       stallTimeout: const Duration(seconds: 3));
   if (autoStart) await mgr.start();
   return TestNode(
@@ -86,7 +86,7 @@ Future<TestNode> makeNodeOn(TestNode old) async {
       manager: mgr,
       store: old.store,
       messages: old.messages,
-      chunkSize: 4096,
+      chunkSize: 16 * 1024,
       stallTimeout: const Duration(seconds: 3));
   await mgr.start();
   return TestNode(old.identity, old.db, old.peers, old.messages, pairing,

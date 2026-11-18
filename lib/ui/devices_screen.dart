@@ -189,6 +189,26 @@ class _DevicesScreenState extends State<DevicesScreen> {
                     style: TextStyle(color: Theme.of(context).colorScheme.error)),
               ),
             const Divider(height: 32),
+            Text('Files', style: Theme.of(context).textTheme.titleMedium),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Auto-download files up to'),
+              trailing: DropdownButton<int>(
+                value: const [0, 5, 10, 25, 100]
+                        .contains(c.settings.autoDownloadMaxMb)
+                    ? c.settings.autoDownloadMaxMb
+                    : 10,
+                items: const [
+                  DropdownMenuItem(value: 0, child: Text('Off')),
+                  DropdownMenuItem(value: 5, child: Text('5 MB')),
+                  DropdownMenuItem(value: 10, child: Text('10 MB')),
+                  DropdownMenuItem(value: 25, child: Text('25 MB')),
+                  DropdownMenuItem(value: 100, child: Text('100 MB')),
+                ],
+                onChanged: (v) => c.setAutoDownloadMb(v ?? 0),
+              ),
+            ),
+            const Divider(height: 32),
             Text('Paired devices',
                 style: Theme.of(context).textTheme.titleMedium),
             if (c.pairedPeers.isEmpty) const Text('None yet.'),

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
@@ -145,27 +146,64 @@ class MessageRepository {
         inserted: inserted, duplicates: dup, gaps: gaps, conflicts: conflicts);
   }
 
-  /// Chronological (oldest first). [query] filters by substring.
-  Future<List<ChatMessage>> recent({String? query, int limit = 500}) async {
-    String? where;
-    List<Object?>? args;
-    if (query != null && query.trim().isNotEmpty) {
-      final esc = query
-          .trim()
-          .replaceAll(r'\', r'\\')
-          .replaceAll('%', r'\%')
-          .replaceAll('_', r'\_');
-      where = r"(body LIKE ? ESCAPE '\' OR origin_name LIKE ? ESCAPE '\')";
-      args = ['%$esc%', '%$esc%'];
-    }
+  /// Latest edit per target message id: {id: (text, editTime)}.
+  Future<Map<String, (String, int)>> _edits() async {
     final rows = await _db.query('messages',
-        where: where,
-        whereArgs: args,
-        orderBy: 'created_at DESC, origin_device DESC, origin_seq DESC',
-        limit: limit);
-    return rows.reversed.map(_fromRow).toList();
+        where: 'kind=?',
+        whereArgs: [editKind],
+        orderBy: 'created_at ASC, origin_device ASC, origin_seq ASC');
+    final out = <String, (String, int)>{};
+    for (final r in rows) {
+      try {
+        final j = jsonDecode(r['body'] as String);
+        if (j is Map && j['t'] is String && j['b'] is String) {
+          out[j['t'] as String] = (j['b'] as String, r['created_at'] as int);
+        }
+      } catch (_) {}
+    }
+    return out; // later rows overwrite earlier ones => latest wins
   }
 
-  Future<int> count() async => Sqflite.firstIntValue(
-      await _db.rawQuery('SELECT COUNT(*) FROM messages'))!;
+  /// Chronological (oldest first), edits applied and edit events hidden.
+  /// [query] filters case-insensitively on the *current* text.
+  Future<List<ChatMessage>> recent({String? query, int limit = 500}) async {
+    final edits = await _edits();
+    final q = query?.trim().toLowerCase() ?? '';
+    final rows = await _db.query('messages',
+        where: 'kind<>?',
+        whereArgs: [editKind],
+        orderBy: 'created_at DESC, origin_device DESC, origin_seq DESC',
+        limit: q.isEmpty ? limit : null);
+    final out = <ChatMessage>[];
+    for (final r in rows) {
+      var m = _fromRow(r);
+      final e = m.kind == 'text' ? edits[m.id] : null;
+      if (e != null) m = m.withEdit(e.$1, e.$2);
+      if (q.isNotEmpty &&
+          !m.body.toLowerCase().contains(q) &&
+          !m.originName.toLowerCase().contains(q)) {
+        continue;
+      }
+      out.add(m);
+      if (out.length >= limit) break;
+    }
+    return out.reversed.toList();
+  }
+
+  /// Appends an edit of text message [target]. Throws if it is not an
+  /// editable text message.
+  Future<ChatMessage> createEdit(
+      String targetId, String newText, String originName) async {
+    final rows = await _db.query('messages',
+        columns: ['kind'], where: 'id=?', whereArgs: [targetId]);
+    if (rows.isEmpty || rows.first['kind'] != 'text') {
+      throw ArgumentError('Only text messages can be edited');
+    }
+    return createLocalText(
+        jsonEncode({'t': targetId, 'b': newText}), originName,
+        kind: editKind);
+  }
+
+  Future<int> count() async => Sqflite.firstIntValue(await _db
+    .rawQuery('SELECT COUNT(*) FROM messages WHERE kind<>?', [editKind]))!;
 }

@@ -1,0 +1,52 @@
+name: Build desktop apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.9
+          channel: stable
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build cmake clang pkg-config libgtk-3-dev libsecret-1-dev libjsoncpp-dev
+      - run: flutter pub get
+      - run: flutter test
+      - run: flutter build linux --release
+      - run: tar -czf smoogi-share-linux-x64.tar.gz -C build/linux/x64/release/bundle .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: smoogi-share-linux-x64.tar.gz
+      - if: startsWith(github.ref, 'refs/tags/')
+        run: gh release upload "${{ github.ref_name }}" smoogi-share-linux-x64.tar.gz --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.9
+          channel: stable
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - run: ditto -c -k --keepParent build/macos/Build/Products/Release/smoogi_share.app smoogi-share-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: smoogi-share-macos.zip
+      - if: startsWith(github.ref, 'refs/tags/')
+        run: gh release upload "${{ github.ref_name }}" smoogi-share-macos.zip --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

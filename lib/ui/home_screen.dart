@@ -284,10 +284,18 @@ class _MessageCardState extends State<MessageCard> {
             Expanded(
               child: Text(
                 '${mine ? 'This device' : m.originName} · $time'
+                '${m.editedAt != null ? ' · edited' : ''}'
                 '${status != null ? ' · $status' : ''}',
                 style: Theme.of(context).textTheme.labelSmall,
               ),
             ),
+            if (m.kind == 'text')
+              IconButton(
+                tooltip: 'Edit',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.edit, size: 18),
+                onPressed: () => _edit(context),
+              ),
             IconButton(
               tooltip: 'Copy',
               visualDensity: VisualDensity.compact,
@@ -342,6 +350,41 @@ class _MessageCardState extends State<MessageCard> {
         ]),
       ),
     );
+  }
+
+  Future<void> _edit(BuildContext context) async {
+    final ctl = TextEditingController(text: widget.message.body);
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit message'),
+        content: SizedBox(
+          width: 500,
+          child: TextField(
+            controller: ctl,
+            autofocus: true,
+            minLines: 3,
+            maxLines: 14,
+            style: const TextStyle(fontFamily: 'monospace'),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctl.text),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (text == null || text == widget.message.body) return;
+    try {
+      await widget.controller.editMessage(widget.message, text);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   String _2(int n) => n.toString().padLeft(2, '0');

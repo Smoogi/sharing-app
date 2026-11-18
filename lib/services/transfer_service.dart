@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
-import '../core/bytes.dart';
 import '../core/protocol.dart';
 import '../data/attachment_store.dart';
 import '../data/message_repository.dart';
@@ -38,7 +38,7 @@ class _Download {
 ///
 ///   file_get   {mid, offset}              downloader -> source
 ///   file_start {mid, offset}              source -> downloader
-///   file_chunk {mid, off, d(base64)}      source -> downloader
+///   file_chunk {mid, off, bin(raw)}       source -> downloader (binary frame)
 ///   file_end   {mid}
 ///   file_err   {mid, reason}              e.g. not_found
 class TransferService {
@@ -46,7 +46,7 @@ class TransferService {
     required this.manager,
     required this.store,
     required this.messages,
-    this.chunkSize = 48 * 1024,
+    this.chunkSize = 192 * 1024,
     this.stallTimeout = const Duration(seconds: 20),
   }) {
     manager.transfers = this;
@@ -193,12 +193,12 @@ class TransferService {
         final d = _downloads[mid];
         if (d == null || d.channel != ch || d.raf == null) return;
         final off = m['off'];
-        final data = m['d'];
-        if (off is! int || data is! String || off != d.received) {
+        final data = m['bin'];
+        if (off is! int || data is! Uint8List || off != d.received) {
           _fail(d, _Outcome.interrupted);
           return;
         }
-        final bytes = unb64(data);
+        final bytes = data;
         if (d.received + bytes.length > d.meta.size) {
           _fail(d, _Outcome.badHash);
           return;
@@ -248,7 +248,7 @@ class TransferService {
         final want = (att.size - pos) < chunkSize ? att.size - pos : chunkSize;
         final buf = await raf.read(want);
         if (buf.isEmpty) break;
-        await ch.send({'t': 'file_chunk', 'mid': mid, 'off': pos, 'd': b64(buf)});
+        await ch.send({'t': 'file_chunk', 'mid': mid, 'off': pos, 'bin': buf});
         pos += buf.length;
       }
       await ch.send({'t': 'file_end', 'mid': mid});

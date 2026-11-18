@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'bytes.dart';
 
@@ -60,25 +61,76 @@ class DeviceIdentity {
   }
 }
 
-/// Stores the identity in a JSON file inside the app-private directory.
+/// Where the private seed can live outside the app's plain files
+/// (Android Keystore-backed, Windows Credential Manager, macOS Keychain, ...).
+abstract class SeedVault {
+  Future<String?> read();
+  Future<void> write(String value);
+}
+
+class SecureStorageVault implements SeedVault {
+  SecureStorageVault([FlutterSecureStorage? s])
+      : _s = s ?? const FlutterSecureStorage();
+  final FlutterSecureStorage _s;
+  static const _key = 'smoogi_identity_seed_v1';
+
+  @override
+  Future<String?> read() => _s.read(key: _key);
+
+  @override
+  Future<void> write(String value) => _s.write(key: _key, value: value);
+}
+
+/// Identity persistence. The Ed25519 seed is kept in the OS secure store when
+/// available; the JSON file then only holds the device name. If the secure
+/// store is unavailable (e.g. Linux without libsecret) the seed stays in the
+/// app-private file as before. An existing file-based seed is migrated, and
+/// only removed from the file after the vault read-back matches.
 ///
-/// LIMITATION: the seed is stored unencrypted in app-private storage (relies
-/// on OS sandboxing). TODO: move the seed to Android Keystore / Windows DPAPI /
-/// macOS Keychain (e.g. flutter_secure_storage) in a later milestone.
+/// A vaulted identity whose key has vanished is an error, never silently
+/// replaced (that would orphan every pairing).
 class FileIdentityStore {
-  FileIdentityStore(this.file);
+  FileIdentityStore(this.file, {this.vault});
   final File file;
+  final SeedVault? vault;
+
+  Future<bool> _vaultStore(String seedB64) async {
+    final v = vault;
+    if (v == null) return false;
+    try {
+      await v.write(seedB64);
+      return await v.read() == seedB64;
+    } catch (_) {
+      return false;
+    }
+  }
 
   Future<DeviceIdentity> loadOrCreate({required String defaultName}) async {
     if (await file.exists()) {
+      final Map<String, dynamic> j;
       try {
-        final j = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-        return await DeviceIdentity.fromSeed(
-            unb64(j['seed'] as String), j['name'] as String? ?? defaultName);
+        j = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
       } catch (_) {
-        // Corrupt identity file: do NOT silently replace it.
         throw StateError('Identity file ${file.path} is unreadable.');
       }
+      final name = j['name'] as String? ?? defaultName;
+      String? seed = j['seed'] as String?;
+      if (seed != null) {
+        final id = await DeviceIdentity.fromSeed(unb64(seed), name);
+        if (await _vaultStore(seed)) await _writeFile(name, null); // migrate
+        return id;
+      }
+      if (j['vaulted'] == true) {
+        try {
+          seed = await vault?.read();
+        } catch (_) {}
+        if (seed == null) {
+          throw StateError(
+              'The device key is missing from the system keystore. Restore it or reset the app data folder (this requires re-pairing).');
+        }
+        return DeviceIdentity.fromSeed(unb64(seed), name);
+      }
+      throw StateError('Identity file ${file.path} has no key.');
     }
     final id = await DeviceIdentity.generate(name: defaultName);
     await save(id);
@@ -86,10 +138,19 @@ class FileIdentityStore {
   }
 
   Future<void> save(DeviceIdentity id) async {
+    final seed = b64(await id.exportSeed());
+    final vaulted = await _vaultStore(seed);
+    await _writeFile(id.name, vaulted ? null : seed);
+  }
+
+  Future<void> _writeFile(String name, String? seed) async {
     await file.parent.create(recursive: true);
     final tmp = File('${file.path}.tmp');
     await tmp.writeAsString(
-        jsonEncode({'seed': b64(await id.exportSeed()), 'name': id.name}),
+        jsonEncode({
+          'name': name,
+          if (seed != null) 'seed': seed else 'vaulted': true,
+        }),
         flush: true);
     await tmp.rename(file.path);
   }

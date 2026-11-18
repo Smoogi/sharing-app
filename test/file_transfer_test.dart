@@ -100,7 +100,7 @@ void main() {
     final a = await makeNode('A');
     final b = await makeNode('B');
     await pairNodes(a, b);
-    final src = await tempFile('drop.bin', 3000000);
+    final src = await tempFile('drop.bin', 15000000);
     final sent = await a.transfers.sendFile(src);
     await eventually(() async => (await b.messages.count()) == 1);
     final m = await fileMessageOn(b, sent.id);

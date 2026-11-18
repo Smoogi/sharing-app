@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/identity.dart';
 import '../core/network_info.dart';
+import '../core/settings.dart';
 import '../core/protocol.dart';
 import '../data/app_database.dart';
 import '../data/attachment_store.dart';
@@ -31,6 +32,9 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   late final SecureTcpTransport _transport;
   late final AttachmentStore store;
   late final TransferService transfers;
+  late final AppSettings settings;
+  final _autoTried = <String>{};
+  bool _autoRunning = false;
   DiscoveryService? _discovery;
   Map<String, LocalAttachment> attachments = {};
 
@@ -47,7 +51,8 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> init() async {
     final dir = await getApplicationSupportDirectory();
-    _identityStore = FileIdentityStore(File(p.join(dir.path, 'identity.json')));
+    _identityStore = FileIdentityStore(File(p.join(dir.path, 'identity.json')),
+        vault: SecureStorageVault());
     final os = Platform.isAndroid ? 'Android' : Platform.operatingSystem;
     identity = await _identityStore.loadOrCreate(defaultName: os);
     // First run: make the default name recognisable.
@@ -55,6 +60,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
       identity.name = '$os ${identity.deviceId.substring(0, 4)}';
       await _identityStore.save(identity);
     }
+    settings = await AppSettings.load(File(p.join(dir.path, 'settings.json')));
     final db = await AppDatabase.open(p.join(dir.path, 'smoogi.db'));
     messages = MessageRepository(db, localDeviceId: identity.deviceId);
     peers = PeerRepository(db);
@@ -81,7 +87,10 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     _subs
       ..add(messages.changes.listen((_) => refresh()))
       ..add(peers.changes.listen((_) => refresh()))
-      ..add(manager.stateChanges.listen((_) => refresh()))
+      ..add(manager.stateChanges.listen((_) {
+        _autoTried.clear(); // a (re)connection is a fresh chance to download
+        refresh();
+      }))
       ..add(transfers.changes.listen((_) => refresh()));
     WidgetsBinding.instance.addObserver(this);
     ready = true;
@@ -95,6 +104,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     peerVectors = await peers.vectors();
     attachments = await store.all();
     notifyListeners();
+    unawaited(_autoDownload());
   }
 
   Future<void> reloadAddresses() async {
@@ -109,6 +119,42 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> sendText(String text) async {
     await manager.sendText(text);
+  }
+
+  Future<void> setAutoDownloadMb(int mb) async {
+    settings.autoDownloadMaxMb = mb;
+    await settings.save();
+    _autoTried.clear();
+    notifyListeners();
+    unawaited(_autoDownload());
+  }
+
+  /// Downloads small files from connected devices, one at a time.
+  Future<void> _autoDownload() async {
+    final limit = settings.autoDownloadMaxMb * 1024 * 1024;
+    if (_autoRunning || limit <= 0 || onlineIds.isEmpty) return;
+    _autoRunning = true;
+    try {
+      for (final m in List<ChatMessage>.of(items)) {
+        if (m.kind != 'file' ||
+            attachments.containsKey(m.id) ||
+            _autoTried.contains(m.id) ||
+            transfers.isActive(m.id)) {
+          continue;
+        }
+        final meta = FileMeta.tryParse(m.body);
+        if (meta == null || meta.size > limit) continue;
+        if (onlineIds.isEmpty) break;
+        _autoTried.add(m.id);
+        await transfers.download(m);
+      }
+    } finally {
+      _autoRunning = false;
+    }
+  }
+
+  Future<void> editMessage(ChatMessage m, String newText) async {
+    await manager.sendEdit(m.id, newText);
   }
 
   Future<void> sendFiles(List<String> paths) async {

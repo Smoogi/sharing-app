@@ -21,6 +21,7 @@ ChatMessage m(String dev, int seq, {String? id, String body = 'x'}) =>
         body: body);
 
 void main() {
+  group("edits", editTests);
   late MessageRepository repo;
   setUp(() async {
     repo = MessageRepository(await AppDatabase.open(inMemoryDatabasePath),
@@ -114,5 +115,46 @@ void main() {
     expect(next.originSeq, 2);
     await db.close();
     await dir.delete(recursive: true);
+  });
+}
+
+void editTests() {
+  late MessageRepository repo;
+  setUp(() async {
+    repo = MessageRepository(await AppDatabase.open(inMemoryDatabasePath),
+        localDeviceId: a);
+  });
+
+  test('edit replaces text in the view, original row is kept, latest wins',
+      () async {
+    final m1 = await repo.createLocalText('draft', 'A',
+        now: DateTime.utc(2026, 1, 1));
+    await repo.createEdit(m1.id, 'second', 'A');
+    await repo.createEdit(m1.id, 'third', 'A');
+    final v = await repo.recent();
+    expect(v.length, 1);
+    expect(v.single.body, 'third');
+    expect(v.single.editedAt, isNotNull);
+    expect(await repo.count(), 1);
+    expect((await repo.recent(query: 'third')).length, 1);
+    expect((await repo.recent(query: 'draft')).length, 0);
+  });
+
+  test('edits sync like any message and converge on other devices', () async {
+    final repoB = MessageRepository(
+        await AppDatabase.open(inMemoryDatabasePath),
+        localDeviceId: b);
+    final m1 = await repo.createLocalText('hello', 'A');
+    await repoB.apply(await repo.missingFor(await repoB.vector()));
+    await repoB.createEdit(m1.id, 'hello (fixed on B)', 'B'); // other device edits
+    await repo.apply(await repoB.missingFor(await repo.vector()));
+    expect((await repo.recent()).single.body, 'hello (fixed on B)');
+    expect((await repoB.recent()).single.body, 'hello (fixed on B)');
+  });
+
+  test('cannot edit files or unknown messages', () async {
+    final f = await repo.createLocalText('{}', 'A', kind: 'file');
+    expect(() => repo.createEdit(f.id, 'x', 'A'), throwsArgumentError);
+    expect(() => repo.createEdit('nope', 'x', 'A'), throwsArgumentError);
   });
 }

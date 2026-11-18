@@ -408,7 +408,26 @@ class _TcpPeerChannel implements PeerChannel {
     // Serialise sends: nonce order must equal wire order.
     final result = _sendChain.then((_) async {
       if (_io.isClosed) throw const SocketException('channel closed');
-      final plain = utf8.encode(jsonEncode(message));
+      // Plaintext = [type][body]. type 0: JSON. type 1: raw bytes carried in
+      // message['bin'] (file chunks): [1][u32 headerLen][header JSON][bytes].
+      final Uint8List plain;
+      final bin = message['bin'];
+      if (bin is Uint8List) {
+        final header =
+            utf8.encode(jsonEncode(Map.of(message)..remove('bin')));
+        final len = ByteData(4)..setUint32(0, header.length);
+        plain = concat([
+          [1],
+          len.buffer.asUint8List(),
+          header,
+          bin
+        ]);
+      } else {
+        plain = concat([
+          [0],
+          utf8.encode(jsonEncode(message))
+        ]);
+      }
       if (plain.length + 64 > maxFrameBytes) {
         throw ProtocolException('message too large');
       }
@@ -437,8 +456,19 @@ class _TcpPeerChannel implements PeerChannel {
         secretKey: _recvKey,
       );
       _recvCounter++;
-      final obj = jsonDecode(utf8.decode(plain));
+      if (plain.isEmpty) throw const FormatException();
+      final bytes = Uint8List.fromList(plain);
+      if (bytes[0] == 0) {
+        final obj = jsonDecode(utf8.decode(Uint8List.sublistView(bytes, 1)));
+        if (obj is! Map<String, dynamic>) throw const FormatException();
+        return obj;
+      }
+      if (bytes[0] != 1 || bytes.length < 5) throw const FormatException();
+      final hl = ByteData.sublistView(bytes, 1, 5).getUint32(0);
+      if (5 + hl > bytes.length) throw const FormatException();
+      final obj = jsonDecode(utf8.decode(bytes.sublist(5, 5 + hl)));
       if (obj is! Map<String, dynamic>) throw const FormatException();
+      obj['bin'] = bytes.sublist(5 + hl);
       return obj;
     } catch (_) {
       // Tampered, replayed, reordered or malformed frame: kill the channel.

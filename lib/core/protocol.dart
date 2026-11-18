@@ -7,10 +7,15 @@
 ///   msgs         {t, msgs:[Message]}    ascending per origin, contiguous
 ///   vector       {t, vector}            "this is what I now have" (ack)
 ///   ping / bye   {t[, reason]}
-const protocolVersion = 1;
+const protocolVersion = 2;
 
 /// Max size of one encrypted frame (after length prefix).
 const maxFrameBytes = 8 * 1024 * 1024;
+
+/// Edits are ordinary append-only messages of kind 'edit' whose body is
+/// {"t": targetMessageId, "b": newText}. The latest edit (by time, then
+/// device id, then seq) wins; the original is never rewritten.
+const editKind = 'edit';
 
 /// Max UTF-8 size of one text message body.
 const maxTextBytes = 1024 * 1024;
@@ -36,6 +41,7 @@ class ChatMessage {
     required this.createdAt,
     required this.kind,
     required this.body,
+    this.editedAt,
   });
 
   final String id;
@@ -50,6 +56,19 @@ class ChatMessage {
   /// newer app versions never stall an older one's sequence.
   final String kind;
   final String body;
+
+  /// Local view only (never sent): time of the latest applied edit, if any.
+  final int? editedAt;
+
+  ChatMessage withEdit(String newBody, int at) => ChatMessage(
+      id: id,
+      originDeviceId: originDeviceId,
+      originName: originName,
+      originSeq: originSeq,
+      createdAt: createdAt,
+      kind: kind,
+      body: newBody,
+      editedAt: at);
 
   Map<String, dynamic> toJson() => {
         'id': id,

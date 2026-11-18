@@ -201,6 +201,16 @@ class ConnectionManager {
     return msg;
   }
 
+  Future<ChatMessage> sendEdit(String targetId, String newText) async {
+    if (newText.trim().isEmpty) throw ArgumentError('Empty message');
+    if (utf8.encode(newText).length > maxTextBytes) {
+      throw ArgumentError('Message too large (max 1 MiB of text)');
+    }
+    final msg = await messages.createEdit(targetId, newText, identity.name);
+    await _broadcast([msg]);
+    return msg;
+  }
+
   Future<void> _broadcast(List<ChatMessage> msgs, {String? exceptDevice}) async {
     for (final e in _sessions.entries.toList()) {
       if (e.key == exceptDevice) continue;
