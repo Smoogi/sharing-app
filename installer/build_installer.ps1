@@ -8,8 +8,8 @@ Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $stage, $dist | Out-Null
 Compress-Archive -Path "$rel\*" -DestinationPath "$stage\payload.zip" -Force
 Copy-Item "$PSScriptRoot\install.ps1","$PSScriptRoot\uninstall.ps1" $stage
-$out = Join-Path $dist 'smoogi-share-setup.exe'
-Remove-Item $out -Force -ErrorAction SilentlyContinue
+$final = Join-Path $dist 'smoogi-share-setup.exe'
+$out = Join-Path $env:TEMP ('smoogi-setup-' + [guid]::NewGuid().ToString('N') + '.exe')
 $sed = @"
 [Version]
 Class=IEXPRESS
@@ -47,5 +47,9 @@ FILE2="uninstall.ps1"
 $sedPath = Join-Path $stage 'setup.sed'
 Set-Content $sedPath $sed -Encoding ASCII
 Start-Process iexpress.exe -ArgumentList '/N','/Q',$sedPath -Wait
+for ($i = 0; $i -lt 60 -and -not (Test-Path $out); $i++) { Start-Sleep -Milliseconds 500 }
 if (-not (Test-Path $out)) { throw 'IExpress did not produce the installer' }
-Get-Item $out | Select Name, Length
+Start-Sleep -Seconds 1
+Copy-Item $out $final -Force
+Remove-Item $out -Force -ErrorAction SilentlyContinue
+Get-Item $final | Select Name, Length, LastWriteTime
