@@ -12,16 +12,17 @@ const singleInstancePort = 47731;
 
 /// Returns true when this process is the only instance. Otherwise it asks the
 /// running one to show its window and returns false (the caller exits).
-Future<bool> claimSingleInstance(void Function() onShow) async {
+Future<bool> claimSingleInstance(void Function() onShow,
+    {int port = singleInstancePort}) async {
   try {
-    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, singleInstancePort);
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
     server.listen((s) {
       s.listen((_) => onShow(), onError: (_) {}, onDone: s.destroy);
     }, onError: (_) {});
     return true;
   } on SocketException {
     try {
-      final s = await Socket.connect(InternetAddress.loopbackIPv4, singleInstancePort,
+      final s = await Socket.connect(InternetAddress.loopbackIPv4, port,
           timeout: const Duration(seconds: 2));
       s.add(const [1]);
       await s.flush();

@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../core/file_names.dart';
+import '../core/media_kind.dart';
+import 'media_viewer.dart';
 
 import '../app/app_controller.dart';
 import '../core/protocol.dart';
@@ -50,32 +52,47 @@ class FileBody extends StatelessWidget {
     final st = c.transfers.states[message.id];
     final scheme = Theme.of(context).colorScheme;
 
+    final kind = mediaKindOf(meta.name, meta.mime);
+
+    Future<void> save() async {
+      String text;
+      try {
+        final path = await c.saveToDownloads(message);
+        text = path == null ? 'Could not find Downloads folder' : 'Saved to $path';
+      } catch (e) {
+        text = 'Could not save: $e';
+      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    }
+
+    // Right-click on desktop, long-press on phones.
+    Future<void> menu(Offset at) async {
+      if (local == null) return;
+      final size = MediaQuery.of(context).size;
+      final choice = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromLTRB(at.dx, at.dy, size.width - at.dx, size.height - at.dy),
+        items: const [
+          PopupMenuItem(value: 'save', child: Text('Save to Downloads')),
+          PopupMenuItem(value: 'open', child: Text('Open with another app')),
+        ],
+      );
+      if (choice == 'save') await save();
+      if (choice == 'open') await c.openFile(message);
+    }
+
     Widget action;
     if (local != null) {
-      action = Wrap(spacing: 8, children: [
-        FilledButton.tonalIcon(
-            onPressed: () => c.openFile(message),
-            icon: const Icon(Icons.open_in_new, size: 18),
-            label: const Text('Open')),
-        if (Platform.isWindows || Platform.isLinux || Platform.isMacOS || Platform.isAndroid)
-          OutlinedButton.icon(
-              onPressed: () async {
-                String text;
-                try {
-                  final path = await c.saveToDownloads(message);
-                  text = path == null
-                      ? 'Could not find Downloads folder'
-                      : 'Saved to $path';
-                } catch (e) {
-                  text = 'Could not save: $e';
-                }
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(SnackBar(content: Text(text)));
-              },
-              icon: const Icon(Icons.download_done, size: 18),
-              label: const Text('Save to Downloads')),
-      ]);
+      // Media opens inside the app; everything else keeps an Open button.
+      action = kind == MediaKind.other
+          ? Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.tonalIcon(
+                  onPressed: () => c.openFile(message),
+                  icon: const Icon(Icons.open_in_new, size: 18),
+                  label: const Text('Open')))
+          : const SizedBox.shrink();
     } else if (st?.status == TransferStatus.downloading) {
       action = Row(children: [
         Expanded(child: LinearProgressIndicator(value: st!.fraction)),
@@ -114,20 +131,41 @@ class FileBody extends StatelessWidget {
       ]);
     }
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (local != null && meta.isImage)
+    final body = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (local != null && kind == MediaKind.image)
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.file(File(local.path),
-                height: 200,
-                cacheHeight: 400,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const Text('Preview unavailable')),
+          child: GestureDetector(
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => ImageViewerPage(
+                    path: local.path, title: meta.name, onMenu: menu))),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.file(File(local.path),
+                  height: 200,
+                  cacheHeight: 400,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Text('Preview unavailable')),
+            ),
           ),
         ),
-      if (local != null && meta.isImage)
+      if (local != null && kind == MediaKind.video)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: GestureDetector(
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) =>
+                    VideoPage(path: local.path, title: meta.name, onMenu: menu))),
+            child: Container(
+              width: 240,
+              height: 135,
+              color: Colors.black,
+              child: const Icon(Icons.play_circle_fill, color: Colors.white, size: 56),
+            ),
+          ),
+        ),
+      if (local != null && kind == MediaKind.audio) AudioInline(path: local.path),
+      if (local != null && kind == MediaKind.image)
         // 4chan style: only size and type; tap to see the file name.
         Tooltip(
           message: meta.name,
@@ -161,5 +199,12 @@ class FileBody extends StatelessWidget {
       const SizedBox(height: 8),
       action,
     ]);
+    if (local == null) return body;
+    return GestureDetector(
+      behavior: HitTestBehavior.deferToChild,
+      onSecondaryTapUp: (d) => menu(d.globalPosition),
+      onLongPressStart: (d) => menu(d.globalPosition),
+      child: body,
+    );
   }
 }

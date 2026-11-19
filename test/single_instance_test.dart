@@ -8,8 +8,8 @@ void main() {
     final shown = Completer<void>();
     expect(await claimSingleInstance(() {
       if (!shown.isCompleted) shown.complete();
-    }), isTrue);
-    expect(await claimSingleInstance(() {}), isFalse);
+    }, port: 47791), isTrue);
+    expect(await claimSingleInstance(() {}, port: 47791), isFalse);
     await shown.future.timeout(const Duration(seconds: 3));
   });
 }

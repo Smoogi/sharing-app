@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 
 import 'dart:io';
 
@@ -9,6 +10,7 @@ import 'ui/post_card.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   DesktopShell? shell;
   if (DesktopShell.supported) {
     final first = await claimSingleInstance(() => shell?.show());
