@@ -117,10 +117,23 @@ class MainActivity : FlutterActivity() {
             addCategory(Intent.CATEGORY_OPENABLE)
             putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         }
+        val chooser = Intent.createChooser(get, null)
+        // Ask the chooser to list Samsung Gallery first (initial intents come
+        // before the system's own ordering). Skipped where it is not installed.
+        try {
+            val gallery = packageManager.queryIntentActivities(get, 0)
+                .firstOrNull { it.activityInfo.packageName == "com.sec.android.gallery3d" }
+            if (gallery != null) {
+                val first = Intent(get).setClassName(
+                    gallery.activityInfo.packageName, gallery.activityInfo.name)
+                chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(first))
+            }
+        } catch (_: Exception) {
+        }
         try {
             pickResult = result
             @Suppress("DEPRECATION")
-            startActivityForResult(Intent.createChooser(get, null), PICK_REQUEST)
+            startActivityForResult(chooser, PICK_REQUEST)
         } catch (e: Exception) {
             pickResult = null
             result.error("pick", e.message, null)
