@@ -20,6 +20,12 @@ String formatSize(int bytes) {
   return '${v.toStringAsFixed(i == 0 ? 0 : 1)} ${u[i]}';
 }
 
+/// 'image/jpeg' -> 'JPG', 'image/gif' -> 'GIF'.
+String imageTypeLabel(String mime) {
+  final t = mime.split('/').last.toUpperCase();
+  return t == 'JPEG' ? 'JPG' : t;
+}
+
 IconData iconFor(FileMeta m) {
   if (m.isImage) return Icons.image;
   if (m.mime.startsWith('audio/')) return Icons.audiotrack;
@@ -121,24 +127,37 @@ class FileBody extends StatelessWidget {
                 errorBuilder: (_, __, ___) => const Text('Preview unavailable')),
           ),
         ),
-      Row(children: [
-        Icon(iconFor(meta)),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Tooltip(
-              message: meta.name,
-              child: SelectableText(
-                  meta.isImage && c.settings.shortImageNames
-                      ? shortDisplayName(meta.name)
-                      : meta.name,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-            ),
-            Text('${formatSize(meta.size)} · ${meta.mime}',
+      if (local != null && meta.isImage)
+        // 4chan style: only size and type; tap to see the file name.
+        Tooltip(
+          message: meta.name,
+          triggerMode: TooltipTriggerMode.tap,
+          showDuration: const Duration(seconds: 4),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Text('${formatSize(meta.size)} ${imageTypeLabel(meta.mime)}',
                 style: Theme.of(context).textTheme.bodySmall),
-          ]),
-        ),
-      ]),
+          ),
+        )
+      else
+        Row(children: [
+          Icon(iconFor(meta)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Tooltip(
+                message: meta.name,
+                child: SelectableText(
+                    meta.isImage && c.settings.shortImageNames
+                        ? shortDisplayName(meta.name)
+                        : meta.name,
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+              ),
+              Text('${formatSize(meta.size)} · ${meta.mime}',
+                  style: Theme.of(context).textTheme.bodySmall),
+            ]),
+          ),
+        ]),
       const SizedBox(height: 8),
       action,
     ]);
