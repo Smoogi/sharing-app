@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../core/file_names.dart';
+
 import '../app/app_controller.dart';
 import '../core/protocol.dart';
 import '../data/attachment_store.dart';
@@ -124,8 +126,14 @@ class FileBody extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            SelectableText(meta.name,
-                style: const TextStyle(fontWeight: FontWeight.w600)),
+            Tooltip(
+              message: meta.name,
+              child: SelectableText(
+                  meta.isImage && c.settings.shortImageNames
+                      ? shortDisplayName(meta.name)
+                      : meta.name,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+            ),
             Text('${formatSize(meta.size)} · ${meta.mime}',
                 style: Theme.of(context).textTheme.bodySmall),
           ]),

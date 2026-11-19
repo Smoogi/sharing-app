@@ -244,10 +244,12 @@ class AttachmentStore {
 
   /// Copies a stored file to [targetDir] without overwriting anything
   /// ("name (1).ext" if needed). Returns the new path.
-  Future<String> saveCopy(LocalAttachment a, Directory targetDir) async {
+  Future<String> saveCopy(LocalAttachment a, Directory targetDir,
+      {String? name}) async {
     await targetDir.create(recursive: true);
-    final base = p.basenameWithoutExtension(a.path);
-    final ext = p.extension(a.path);
+    final from = name ?? p.basename(a.path);
+    final base = p.basenameWithoutExtension(from);
+    final ext = p.extension(from);
     var dest = File(p.join(targetDir.path, '$base$ext'));
     for (var i = 1; await dest.exists(); i++) {
       dest = File(p.join(targetDir.path, '$base ($i)$ext'));

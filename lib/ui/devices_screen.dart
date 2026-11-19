@@ -253,6 +253,33 @@ class _DevicesScreenState extends State<DevicesScreen> {
               value: c.settings.autoUpdateCheck,
               onChanged: c.setAutoUpdateCheck,
             ),
+            const Divider(height: 32),
+            Text('Image and gif names',
+                style: Theme.of(context).textTheme.titleMedium),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('Show long names shortened, like 4chan'),
+              subtitle: const Text(
+                  'Names over 40 characters show as the first 35 + (...) + extension. Hover for the full name. Off shows the original name.'),
+              value: c.settings.shortImageNames,
+              onChanged: (v) async {
+                c.settings.shortImageNames = v ?? true;
+                await c.saveSettings();
+              },
+            ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('Save with a 4chan-style number name'),
+              subtitle: const Text(
+                  'Save to Downloads names images 1700000000123.jpg (the post time) instead of the original name. Off keeps the original name.'),
+              value: c.settings.timestampImageNames,
+              onChanged: (v) async {
+                c.settings.timestampImageNames = v ?? false;
+                await c.saveSettings();
+              },
+            ),
             if (Platform.isWindows || Platform.isMacOS) ...[
               const Divider(height: 32),
               SwitchListTile(

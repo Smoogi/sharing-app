@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+
+import '../core/file_names.dart';
 import 'package:flutter/widgets.dart';
 import 'package:path/path.dart' as p;
 import 'package:open_filex/open_filex.dart';
@@ -360,19 +362,28 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     if (a != null) await OpenFilex.open(a.path);
   }
 
+  Future<void> saveSettings() async {
+    await settings.save();
+    notifyListeners();
+  }
+
   /// Desktop: copy into the user's Downloads folder (never overwrites).
   Future<String?> saveToDownloads(ChatMessage m) async {
     final a = attachments[m.id];
+    final meta = FileMeta.tryParse(m.body);
+    final name = meta == null
+        ? null
+        : (meta.isImage && settings.timestampImageNames
+            ? timestampName(m.createdAt, meta.name)
+            : meta.name);
     if (Platform.isAndroid) {
-      final meta = FileMeta.tryParse(m.body);
-      if (a == null || meta == null) return null;
+      if (a == null || meta == null || name == null) return null;
       return const MethodChannel('smoogi/files').invokeMethod<String>(
-          'saveToDownloads',
-          {'path': a.path, 'name': meta.name, 'mime': meta.mime});
+          'saveToDownloads', {'path': a.path, 'name': name, 'mime': meta.mime});
     }
     final dir = await getDownloadsDirectory();
     if (a == null || dir == null) return null;
-    return store.saveCopy(a, dir);
+    return store.saveCopy(a, dir, name: name);
   }
 
   Future<void> pairWithCode(String text) async {
