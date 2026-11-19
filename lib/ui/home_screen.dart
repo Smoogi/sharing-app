@@ -134,7 +134,33 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Android: ACTION_GET_CONTENT (Gallery, Photos, My Files, ...), like a
+  /// browser. Files are copied to the app cache with their original names.
+  Future<void> _attachAndroid() async {
+    List<dynamic> picked;
+    try {
+      picked = await const MethodChannel('smoogi/files')
+              .invokeMethod<List<dynamic>>('pickFiles') ??
+          const [];
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not open the picker: $e')));
+      return;
+    }
+    final paths = [for (final f in picked) (f as Map)['path'] as String];
+    if (paths.isEmpty) return;
+    await _sendPaths(paths);
+    // The copies in the cache are no longer needed once stored.
+    for (final path in paths) {
+      try {
+        await File(path).parent.delete(recursive: true);
+      } catch (_) {}
+    }
+  }
+
   Future<void> _attach() async {
+    if (Platform.isAndroid) return _attachAndroid();
     final files = await openFiles();
     if (files.isEmpty) return;
     await _sendPaths(files.map((f) => f.path).toList());

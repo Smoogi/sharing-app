@@ -21,6 +21,10 @@ class MainActivity : FlutterActivity() {
     private var pending: Map<String, Any?>? = null
     private var dartReady = false
 
+    companion object {
+        private const val PICK_REQUEST = 4621
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "smoogi/share")
@@ -90,10 +94,77 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                     }
+                    "pickFiles" -> pickFiles(result)
                     else -> result.notImplemented()
                 }
             }
         handleIntent(intent)
+    }
+
+    // --- Attachment picker: ACTION_GET_CONTENT, like a browser's file input --
+    // Unlike ACTION_OPEN_DOCUMENT (documents UI only), this lists every app
+    // that offers files: Samsung Gallery, Google Photos, My Files, ... It
+    // needs no storage permission; the chosen content URIs are readable.
+    private var pickResult: MethodChannel.Result? = null
+
+    private fun pickFiles(result: MethodChannel.Result) {
+        if (pickResult != null) {
+            result.error("busy", "Picker already open", null)
+            return
+        }
+        val get = Intent(Intent.ACTION_GET_CONTENT).apply {
+            type = "*/*"
+            addCategory(Intent.CATEGORY_OPENABLE)
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        try {
+            pickResult = result
+            @Suppress("DEPRECATION")
+            startActivityForResult(Intent.createChooser(get, null), PICK_REQUEST)
+        } catch (e: Exception) {
+            pickResult = null
+            result.error("pick", e.message, null)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != PICK_REQUEST) {
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        val result = pickResult ?: return
+        pickResult = null
+        val uris = ArrayList<Uri>()
+        if (resultCode == RESULT_OK && data != null) {
+            val clip = data.clipData
+            if (clip != null) {
+                for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri)
+            } else {
+                data.data?.let { uris.add(it) }
+            }
+        }
+        if (uris.isEmpty()) {
+            result.success(emptyList<Map<String, Any?>>())
+            return
+        }
+        // Stream each file into the app cache off the UI thread; the original
+        // display name is kept, and the URI grant is only needed until copied.
+        thread {
+            val files = ArrayList<Map<String, Any?>>()
+            var failed: String? = null
+            for (u in uris) {
+                try {
+                    files.add(importUri(u))
+                } catch (e: Exception) {
+                    failed = e.message
+                }
+            }
+            runOnUiThread {
+                if (files.isEmpty() && failed != null) result.error("pick", failed, null)
+                else result.success(files)
+            }
+        }
     }
 
     /** Copies a file into the public Downloads folder (MediaStore, no permission needed). */
