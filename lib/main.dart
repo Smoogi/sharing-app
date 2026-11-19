@@ -1,13 +1,27 @@
 import 'package:flutter/material.dart';
 
+import 'dart:io';
+
 import 'app/app_controller.dart';
+import 'services/desktop_shell.dart';
 import 'ui/home_screen.dart';
 import 'ui/post_card.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  DesktopShell? shell;
+  if (DesktopShell.supported) {
+    final first = await claimSingleInstance(() => shell?.show());
+    if (!first) exit(0);
+  }
   final controller = AppController();
-  runApp(SmoogiApp(controller: controller, init: controller.init()));
+  final init = controller.init().then((_) async {
+    if (DesktopShell.supported) {
+      shell = DesktopShell(controller.settings);
+      await shell!.init();
+    }
+  });
+  runApp(SmoogiApp(controller: controller, init: init));
 }
 
 class SmoogiApp extends StatelessWidget {

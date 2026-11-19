@@ -12,6 +12,10 @@ class AppSettings {
   /// Check GitHub for a new version at most once a day. Off by default.
   bool autoUpdateCheck = false;
 
+  /// Desktop: the close button hides the window to the tray / menu bar and
+  /// the app keeps syncing. On by default.
+  bool keepInTray = true;
+
   /// Epoch ms of the last update check (0 = never).
   int lastUpdateCheck = 0;
 
@@ -25,6 +29,7 @@ class AppSettings {
             s.autoDownloadMaxMb = (j['autoDownloadMaxMb'] as int).clamp(0, 10000);
           }
           if (j['autoUpdateCheck'] is bool) s.autoUpdateCheck = j['autoUpdateCheck'];
+          if (j['keepInTray'] is bool) s.keepInTray = j['keepInTray'];
           if (j['lastUpdateCheck'] is int) s.lastUpdateCheck = j['lastUpdateCheck'];
         }
       }
@@ -37,6 +42,7 @@ class AppSettings {
     await _file.writeAsString(jsonEncode({
       'autoDownloadMaxMb': autoDownloadMaxMb,
       'autoUpdateCheck': autoUpdateCheck,
+      'keepInTray': keepInTray,
       'lastUpdateCheck': lastUpdateCheck,
     }));
   }

@@ -253,6 +253,23 @@ class _DevicesScreenState extends State<DevicesScreen> {
               value: c.settings.autoUpdateCheck,
               onChanged: c.setAutoUpdateCheck,
             ),
+            if (Platform.isWindows || Platform.isMacOS) ...[
+              const Divider(height: 32),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(Platform.isMacOS
+                    ? 'Keep running in the menu bar when the window is closed'
+                    : 'Keep running in the tray when the window is closed'),
+                subtitle: const Text(
+                    'The close button only hides the window, so posts and files still arrive. Use Quit in the tray menu to exit.'),
+                value: c.settings.keepInTray,
+                onChanged: (v) async {
+                  c.settings.keepInTray = v;
+                  await c.settings.save();
+                  setState(() {});
+                },
+              ),
+            ],
             const Divider(height: 32),
             Text('Paired devices',
                 style: Theme.of(context).textTheme.titleMedium),
