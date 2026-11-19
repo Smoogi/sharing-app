@@ -5,10 +5,12 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../app/app_controller.dart';
 import '../core/posts.dart';
+import '../services/clipboard_paste.dart';
 import '../services/connection_manager.dart';
 import 'devices_screen.dart';
 import 'post_card.dart';
@@ -45,6 +47,51 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(n)));
     }));
     c.addListener(_onChange);
+    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+      HardwareKeyboard.instance.addHandler(_onKey);
+    }
+  }
+
+  bool _pasting = false;
+
+  /// Ctrl+V / Cmd+V with an image (or copied files) on the clipboard sends it,
+  /// like a screenshot taken with Win+Shift+S. Text pastes are left alone.
+  bool _onKey(KeyEvent e) {
+    if (e is! KeyDownEvent || e.logicalKey != LogicalKeyboardKey.keyV) return false;
+    final kb = HardwareKeyboard.instance;
+    final mod = Platform.isMacOS ? kb.isMetaPressed : kb.isControlPressed;
+    if (!mod || kb.isAltPressed || !mounted) return false;
+    if (!(ModalRoute.of(context)?.isCurrent ?? false)) return false;
+    unawaited(_pasteAttachments());
+    return false; // never consume: ordinary text paste continues as usual
+  }
+
+  Future<void> _pasteAttachments() async {
+    if (_pasting) return;
+    _pasting = true;
+    try {
+      final tmp = Directory('${(await getTemporaryDirectory()).path}'
+          '${Platform.pathSeparator}smoogi_paste');
+      final paths = await clipboardAttachments(SystemClipboard(), tmp);
+      if (paths.isEmpty) return;
+      await _sendPaths(paths);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            duration: const Duration(seconds: 2),
+            content: Text(paths.length == 1
+                ? 'Pasted ${paths.first.split(Platform.pathSeparator).last}'
+                : 'Pasted ${paths.length} files')));
+      }
+      for (final f in paths.where((f) => f.startsWith(tmp.path))) {
+        try {
+          await File(f).delete();
+        } catch (_) {}
+      }
+    } catch (_) {
+      // Clipboard unreadable: behave like a normal paste.
+    } finally {
+      _pasting = false;
+    }
   }
 
   bool get _atBottom {
@@ -65,6 +112,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
     c.removeListener(_onChange);
     _highlightTimer?.cancel();
     for (final s in _subs) {
