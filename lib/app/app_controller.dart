@@ -12,6 +12,7 @@ import '../core/network_info.dart';
 import '../core/posts.dart';
 import '../core/platform_vault.dart';
 import '../core/settings.dart';
+import '../services/background_work.dart';
 import '../services/self_update.dart';
 import '../services/update_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -120,6 +121,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
       }))
       ..add(transfers.changes.listen((_) => _scheduleRefresh()));
     WidgetsBinding.instance.addObserver(this);
+    backgroundEnabled = network && Platform.isAndroid;
     ready = true;
     await refresh();
     if (network) unawaited(ShareReceiver.start(_onShare));
@@ -194,6 +196,48 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
 
   Timer? _refreshTimer;
 
+  // --- keeping Android alive while work is in flight ---------------------------
+  final background = BackgroundService();
+  bool backgroundEnabled = false;
+  Timer? _bgIdleTimer;
+  Timer? _bgPoll;
+  DateTime? _unackedSince;
+  bool _updatingBg = false;
+
+  /// Runs the foreground service only while a file is moving, or a connected
+  /// device has not yet acknowledged our posts (capped at 10 minutes). It
+  /// stops 15 s after the work ends, which leaves time for final acks.
+  Future<void> updateBackground() async {
+    if (!backgroundEnabled || _updatingBg) return;
+    _updatingBg = true;
+    try {
+      final files = transfers.hasActive;
+      final unacked =
+          hasUnackedForOnline(await messages.vector(), peerVectors, onlineIds);
+      if (!unacked) _unackedSince = null;
+      if (unacked) _unackedSince ??= DateTime.now();
+      final capped = unacked &&
+          !files &&
+          DateTime.now().difference(_unackedSince!) > const Duration(minutes: 10);
+      if (files || (unacked && !capped)) {
+        _bgIdleTimer?.cancel();
+        _bgIdleTimer = null;
+        await background.start(files ? 'Transferring files' : 'Syncing posts');
+        _bgPoll ??= Timer.periodic(
+            const Duration(seconds: 30), (_) => updateBackground());
+      } else if (background.running) {
+        _bgIdleTimer ??= Timer(const Duration(seconds: 15), () {
+          _bgIdleTimer = null;
+          _bgPoll?.cancel();
+          _bgPoll = null;
+          background.stop();
+        });
+      }
+    } finally {
+      _updatingBg = false;
+    }
+  }
+
   /// Transfers report progress for every chunk; reloading the whole list that
   /// often would swamp the UI, so progress updates are coalesced.
   void _scheduleRefresh() {
@@ -219,6 +263,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     }
     notifyListeners();
     unawaited(_autoDownload());
+    unawaited(updateBackground());
   }
 
   Future<void> reloadAddresses() async {
@@ -367,6 +412,9 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _bgIdleTimer?.cancel();
+    _bgPoll?.cancel();
+    background.stop();
     WidgetsBinding.instance.removeObserver(this);
     for (final s in _subs) {
       s.cancel();

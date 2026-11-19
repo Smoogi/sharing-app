@@ -89,6 +89,12 @@ class TransferService {
 
   bool isActive(String mid) => _downloads.containsKey(mid);
 
+  int _serving = 0;
+
+  /// True while any file is being downloaded or served to a peer.
+  bool get hasActive => _downloads.isNotEmpty || _serving > 0;
+
+
   /// Download the file of [m]; resumes a partial file if present. Tries the
   /// origin device first, then any other connected device that has it.
   Future<void> download(ChatMessage m) async {
@@ -262,6 +268,8 @@ class TransferService {
       return;
     }
     RandomAccessFile? raf;
+    _serving++;
+    _changes.add(null);
     try {
       raf = await File(att.path).open();
       await raf.setPosition(offset);
@@ -280,6 +288,8 @@ class TransferService {
       // Channel died mid-transfer; the downloader resumes from its .part.
     } finally {
       await raf?.close();
+      _serving--;
+      _changes.add(null);
     }
   }
 }

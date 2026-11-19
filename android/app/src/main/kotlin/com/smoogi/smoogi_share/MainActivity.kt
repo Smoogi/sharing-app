@@ -46,6 +46,34 @@ class MainActivity : FlutterActivity() {
                     result.error("vault", e.message, null)
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "smoogi/service")
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "start" -> {
+                            if (Build.VERSION.SDK_INT >= 33 &&
+                                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                                android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                // Ask once; the service runs either way.
+                                requestPermissions(
+                                    arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 462)
+                            }
+                            val i = Intent(this, TransferService::class.java)
+                                .putExtra("text", call.argument<String>("text"))
+                            if (Build.VERSION.SDK_INT >= 26) startForegroundService(i)
+                            else startService(i)
+                            result.success(null)
+                        }
+                        "stop" -> {
+                            stopService(Intent(this, TransferService::class.java))
+                            result.success(null)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (e: Exception) {
+                    result.error("service", e.message, null)
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "smoogi/files")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
