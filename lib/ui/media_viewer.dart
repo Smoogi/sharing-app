@@ -1,37 +1,68 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../core/media_kind.dart';
+import '../services/clipboard_paste.dart';
 
 /// Fullscreen image / gif viewer: pinch or scroll to zoom, drag to pan.
+/// The copy button (or Ctrl/Cmd+C) puts the image on the clipboard.
 class ImageViewerPage extends StatelessWidget {
   const ImageViewerPage({super.key, required this.path, required this.title, this.onMenu});
   final String path;
   final String title;
   final void Function(Offset globalPosition)? onMenu;
 
+  Future<void> _copy(BuildContext context) async {
+    String text;
+    try {
+      await copyImageToClipboard(File(path));
+      text = 'Image copied';
+    } catch (e) {
+      text = 'Could not copy: $e';
+    }
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(title, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14)),
-      ),
-      body: GestureDetector(
-        onSecondaryTapUp: onMenu == null ? null : (d) => onMenu!(d.globalPosition),
-        onLongPressStart: onMenu == null ? null : (d) => onMenu!(d.globalPosition),
-        child: Center(
-          child: InteractiveViewer(
-            maxScale: 8,
-            child: Image.file(File(path),
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const Text('Cannot show this image',
-                    style: TextStyle(color: Colors.white))),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyC, control: true): () => _copy(context),
+        const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () => _copy(context),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            title: Text(title, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14)),
+            actions: [
+              IconButton(
+                tooltip: 'Copy image',
+                icon: const Icon(Icons.copy),
+                onPressed: () => _copy(context),
+              ),
+            ],
+          ),
+          body: GestureDetector(
+            onSecondaryTapUp: onMenu == null ? null : (d) => onMenu!(d.globalPosition),
+            onLongPressStart: onMenu == null ? null : (d) => onMenu!(d.globalPosition),
+            child: Center(
+              child: InteractiveViewer(
+                maxScale: 8,
+                child: Image.file(File(path),
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Text('Cannot show this image',
+                        style: TextStyle(color: Colors.white))),
+              ),
+            ),
           ),
         ),
       ),

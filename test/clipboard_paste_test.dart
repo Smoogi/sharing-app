@@ -18,6 +18,7 @@ class FakeClipboard implements ClipboardSource {
 }
 
 void main() {
+  imageToPngTest();
   final png = Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, 1, 2, 3]);
 
   test('screenshot on the clipboard becomes a named png file', () async {
@@ -47,5 +48,17 @@ void main() {
     expect(imageExtension(Uint8List.fromList([0xFF, 0xD8, 0xFF, 0])), 'jpg');
     expect(imageExtension(Uint8List.fromList([0x42, 0x4D, 0])), 'bmp');
     expect(imageExtension(Uint8List.fromList([9, 9])), 'png');
+  });
+}
+
+void imageToPngTest() {
+  testWidgets('any decodable image is converted to PNG for the clipboard', (t) async {
+    // A 1x1 GIF.
+    final gif = Uint8List.fromList([
+      0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF,
+      0x21, 0xF9, 4, 1, 0, 0, 0, 0, 0x2C, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0, 0x3B
+    ]);
+    final png = await t.runAsync(() => imageAsPng(gif));
+    expect(png!.sublist(0, 4), [0x89, 0x50, 0x4E, 0x47]);
   });
 }

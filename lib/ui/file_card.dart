@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core/file_names.dart';
 import '../core/media_kind.dart';
+import '../services/clipboard_paste.dart';
 import 'media_viewer.dart';
 
 import '../app/app_controller.dart';
@@ -73,11 +74,25 @@ class FileBody extends StatelessWidget {
       final choice = await showMenu<String>(
         context: context,
         position: RelativeRect.fromLTRB(at.dx, at.dy, size.width - at.dx, size.height - at.dy),
-        items: const [
-          PopupMenuItem(value: 'save', child: Text('Save to Downloads')),
-          PopupMenuItem(value: 'open', child: Text('Open with another app')),
+        items: [
+          if (kind == MediaKind.image)
+            const PopupMenuItem(value: 'copy', child: Text('Copy image')),
+          const PopupMenuItem(value: 'save', child: Text('Save to Downloads')),
+          const PopupMenuItem(value: 'open', child: Text('Open with another app')),
         ],
       );
+      if (choice == 'copy') {
+        String text;
+        try {
+          await copyImageToClipboard(File(local.path));
+          text = 'Image copied';
+        } catch (e) {
+          text = 'Could not copy: $e';
+        }
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+        }
+      }
       if (choice == 'save') await save();
       if (choice == 'open') await c.openFile(message);
     }

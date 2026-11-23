@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart';
 import 'package:pasteboard/pasteboard.dart';
@@ -53,4 +54,21 @@ Future<List<String>> clipboardAttachments(ClipboardSource cb, Directory tempDir,
       '${screenshotName(now ?? DateTime.now(), imageExtension(img))}');
   await out.writeAsBytes(img, flush: true);
   return [out.path];
+}
+
+/// PNG bytes for any image the app can show (jpeg, webp, gif first frame...).
+Future<Uint8List> imageAsPng(Uint8List bytes) async {
+  final codec = await ui.instantiateImageCodec(bytes);
+  final frame = await codec.getNextFrame();
+  final data = await frame.image.toByteData(format: ui.ImageByteFormat.png);
+  frame.image.dispose();
+  codec.dispose();
+  if (data == null) throw StateError('Could not read the image');
+  return data.buffer.asUint8List();
+}
+
+/// Puts the image file on the system clipboard as an image.
+Future<void> copyImageToClipboard(File file) async {
+  final png = await imageAsPng(await file.readAsBytes());
+  await Pasteboard.writeImage(png);
 }
